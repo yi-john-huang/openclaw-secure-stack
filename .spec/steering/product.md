@@ -1,29 +1,41 @@
 # Product Overview
 
 ## Product Description
-<!-- Describe your product/project in 1-2 sentences -->
+**Project**: openclaw-secure-stack
+**Version**: 0.1.0
+**Type**: Security Sidecar / Reverse Proxy
 
-**Project**: <!-- project name -->
-**Version**: <!-- current version -->
-**Type**: <!-- Web App, CLI Tool, Library, API, etc. -->
+OpenClaw Secure Stack is a hardened deployment wrapper for the OpenClaw AI agent. It wraps an unmodified OpenClaw instance with enterprise-grade security controls — authentication, prompt injection mitigation, skill supply-chain scanning, quarantine management, and network egress filtering — all without modifying a single line of OpenClaw code.
 
 ## Core Features
-<!-- List the main features of your product -->
-- Feature 1
-- Feature 2
-- Feature 3
+- **Bearer Token Authentication** — constant-time token validation on every request
+- **Prompt Injection Sanitizer** — regex-based detection with strip/reject actions
+- **Skill Supply-Chain Scanner** — tree-sitter AST analysis + pattern matching for dangerous APIs, network exfiltration, and filesystem abuse
+- **Quarantine System** — SQLite-backed quarantine with force-override and audit trail
+- **Egress Allowlist** — DNS-level filtering via CoreDNS sidecar (only approved domains resolve)
+- **Audit Logging** — append-only JSON Lines log for all security events
+- **One-Click Deployment** — `install.sh` generates tokens, validates prereqs, launches Docker Compose
 
 ## Target Use Case
-<!-- Describe the primary use case this product solves -->
+Self-hosting OpenClaw in environments where security, auditability, and network isolation are required — small teams, enterprise pilots, regulated environments.
 
 ## Key Value Proposition
-<!-- What makes this product valuable? What problems does it solve? -->
+Run OpenClaw safely without trusting third-party skills or exposing your infrastructure. Zero modifications to OpenClaw itself — the security stack operates as a sidecar/proxy layer.
 
 ## Target Users
-<!-- Who are the primary users of this product? -->
+- DevOps engineers deploying OpenClaw for their team
+- Security-conscious developers who want LLM agent tooling without open network access
+- Organizations requiring audit trails for AI agent actions
 
 ## Success Metrics
-<!-- How do you measure success for this product? -->
+- >= 95% detection rate on known-malicious skill patterns
+- Zero hardcoded secrets in codebase
+- Container image < 100MB (excluding OpenClaw)
+- Clone-to-running in under 5 minutes
 
 ## Technical Advantages
-<!-- What technical benefits does this architecture provide? -->
+- **Sidecar architecture** — no upstream modifications, easy to upgrade OpenClaw independently
+- **Fail-closed design** — missing config = deny all, not allow all
+- **Constant-time auth** — prevents timing-based token extraction
+- **AST-based scanning** — catches obfuscated patterns that regex alone misses
+- **DNS-level egress** — skills cannot resolve non-allowlisted domains at all
