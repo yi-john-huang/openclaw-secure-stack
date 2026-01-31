@@ -23,4 +23,4 @@ USER 65534
 ENV PYTHONPATH=/app/src
 EXPOSE 8080
 
-ENTRYPOINT ["python", "-m", "uvicorn", "src.proxy.app:create_app", "--host", "0.0.0.0", "--port", "8080", "--factory"]
+ENTRYPOINT ["python", "-m", "uvicorn", "src.proxy.app:create_app_from_env", "--host", "0.0.0.0", "--port", "8080", "--factory"]

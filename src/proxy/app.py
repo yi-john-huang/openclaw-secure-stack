@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -11,6 +12,19 @@ from fastapi.responses import JSONResponse
 from src.audit.logger import AuditLogger
 from src.proxy.auth_middleware import AuthMiddleware
 from src.sanitizer.sanitizer import PromptInjectionError, PromptSanitizer
+
+
+def create_app_from_env() -> FastAPI:
+    """Factory for uvicorn --factory: reads config from environment variables."""
+    upstream_url = os.environ["UPSTREAM_URL"]
+    token = os.environ["OPENCLAW_TOKEN"]
+    prompt_rules = os.environ.get(
+        "PROMPT_RULES_PATH", "config/prompt-rules.json",
+    )
+    audit_log = os.environ.get("AUDIT_LOG_PATH")
+    sanitizer = PromptSanitizer(prompt_rules)
+    audit_logger = AuditLogger(audit_log) if audit_log else None
+    return create_app(upstream_url, token, sanitizer, audit_logger)
 
 
 def create_app(

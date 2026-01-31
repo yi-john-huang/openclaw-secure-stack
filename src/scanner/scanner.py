@@ -93,6 +93,15 @@ class PatternScanRule(ScanRule):
         return findings
 
 
+def _get_builtin_ast_rules() -> list[ScanRule]:
+    """Return the built-in AST-based scanner rules."""
+    from src.scanner.rules.dangerous_api import DangerousAPIRule
+    from src.scanner.rules.fs_abuse import FSAbuseRule
+    from src.scanner.rules.network_exfil import NetworkExfilRule
+
+    return [DangerousAPIRule(), NetworkExfilRule(), FSAbuseRule()]
+
+
 def load_rules_from_config(config: list[dict[str, object]] | None) -> list[ScanRule]:
     """Load scan rules from parsed JSON config. Fail-closed on missing config."""
     if config is None:
@@ -108,18 +117,19 @@ def load_rules_from_config(config: list[dict[str, object]] | None) -> list[ScanR
         if "patterns" in entry:
             patterns = [str(p) for p in entry["patterns"]]  # type: ignore[union-attr]
             rules.append(PatternScanRule(rule_id, name, severity, patterns, description))
-        # AST query rules can be added here in future
 
     return rules
 
 
 def load_rules_from_file(rules_path: str) -> list[ScanRule]:
-    """Load rules from a JSON file."""
+    """Load rules from a JSON file, plus built-in AST rules."""
     path = Path(rules_path)
     if not path.exists():
         raise ScannerConfigError(f"Scanner rules file not found: {rules_path}")
     config = json.loads(path.read_text())
-    return load_rules_from_config(config)
+    rules = load_rules_from_config(config)
+    rules.extend(_get_builtin_ast_rules())
+    return rules
 
 
 def _compute_checksum(skill_path: str) -> str:

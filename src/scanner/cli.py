@@ -60,7 +60,7 @@ def quarantine_list(ctx: click.Context) -> None:
     manager: QuarantineManager = ctx.obj["manager"]
     items = manager.get_quarantined()
     output = [
-        {"name": q.name, "status": q.status, "quarantined_at": q.quarantined_at}
+        {"name": q.name, "quarantined_at": q.quarantined_at, "overridden": q.overridden}
         for q in items
     ]
     click.echo(json.dumps(output, indent=2))
