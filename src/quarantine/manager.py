@@ -84,18 +84,22 @@ class QuarantineManager:
             ))
 
     def get_quarantined(self) -> list[QuarantinedSkill]:
-        rows = self.db.list_by_status("quarantined")
+        quarantined = self.db.list_by_status("quarantined")
+        overridden = self.db.list_by_status("overridden")
         result = []
-        for row in rows:
+        for row in quarantined + overridden:
             raw = json.loads(str(row["findings_json"]))
             findings = [ScanFinding.model_validate(f) for f in raw]
+            is_overridden = row["status"] == "overridden"
             result.append(QuarantinedSkill(
                 name=str(row["name"]),
                 original_path=str(row["path"]),
                 quarantined_at=str(row.get("last_scanned", "")),
                 reason=f"{len(findings)} finding(s) detected",
                 findings=findings,
-                overridden=False,
+                overridden=is_overridden,
+                overridden_by=str(row["override_user"]) if is_overridden else None,
+                overridden_at=str(row["override_at"]) if is_overridden else None,
             ))
         return result
 
