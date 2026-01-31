@@ -18,12 +18,12 @@ OpenClaw is a powerful AI agent that can install and run third-party "skills" (J
 
 ```
                     ┌─────────────────────────────────────────┐
-                    │           Docker (internal network)      │
+                    │           Docker (internal network)     │
   User request      │                                         │
- ──────────────►    │  ┌───────────┐      ┌──────────────┐   │
+ ──────────────►    │  ┌───────────┐      ┌───────────────┐   │
                     │  │   Proxy   │─────►│   OpenClaw    │   │
  ◄──────────────    │  │  (auth +  │      │ (unmodified)  │   │
-  Response          │  │ sanitize) │      └──────┬───────┘   │
+  Response          │  │ sanitize) │      └──────┬────────┘   │
                     │  └───────────┘             │            │
                     │                            │ DNS        │
                     │                    ┌───────▼────────┐   │
@@ -35,8 +35,8 @@ OpenClaw is a powerful AI agent that can install and run third-party "skills" (J
 
   Offline (pre-deploy):
   ┌──────────┐     ┌─────────────┐     ┌──────────────┐
-  │  Skill   │────►│   Scanner   │────►│  Quarantine   │
-  │  file    │     │ (tree-sitter│     │  (SQLite DB)  │
+  │  Skill   │────►│   Scanner   │────►│  Quarantine  │
+  │  file    │     │ (tree-sitter│     │  (SQLite DB) │
   └──────────┘     │  AST rules) │     └──────────────┘
                    └─────────────┘
 ```
