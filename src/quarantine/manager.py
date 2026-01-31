@@ -28,7 +28,7 @@ class QuarantineManager:
         db_path: str,
         quarantine_dir: str,
         scanner: SkillScanner,
-        audit_logger: AuditLogger,
+        audit_logger: AuditLogger | None = None,
     ) -> None:
         self.db = QuarantineDB(db_path)
         self.quarantine_dir = Path(quarantine_dir)
@@ -51,13 +51,14 @@ class QuarantineManager:
             last_scanned=report.scanned_at,
         )
 
-        self.audit_logger.log(AuditEvent(
-            event_type=AuditEventType.SKILL_QUARANTINE,
-            action=f"quarantine:{report.skill_name}",
-            result="success",
-            risk_level=RiskLevel.HIGH,
-            details={"skill_name": report.skill_name, "findings": len(report.findings)},
-        ))
+        if self.audit_logger:
+            self.audit_logger.log(AuditEvent(
+                event_type=AuditEventType.SKILL_QUARANTINE,
+                action=f"quarantine:{report.skill_name}",
+                result="success",
+                risk_level=RiskLevel.HIGH,
+                details={"skill_name": report.skill_name, "findings": len(report.findings)},
+            ))
 
     def is_quarantined(self, skill_name: str) -> bool:
         skill = self.db.get_skill(skill_name)
@@ -72,14 +73,15 @@ class QuarantineManager:
             override_at=now,
         )
 
-        self.audit_logger.log(AuditEvent(
-            event_type=AuditEventType.SKILL_OVERRIDE,
-            action=f"override:{skill_name}",
-            user_id=user_id,
-            result="success",
-            risk_level=RiskLevel.CRITICAL,
-            details={"skill_name": skill_name, "ack": ack},
-        ))
+        if self.audit_logger:
+            self.audit_logger.log(AuditEvent(
+                event_type=AuditEventType.SKILL_OVERRIDE,
+                action=f"override:{skill_name}",
+                user_id=user_id,
+                result="success",
+                risk_level=RiskLevel.CRITICAL,
+                details={"skill_name": skill_name, "ack": ack},
+            ))
 
     def get_quarantined(self) -> list[QuarantinedSkill]:
         rows = self.db.list_by_status("quarantined")

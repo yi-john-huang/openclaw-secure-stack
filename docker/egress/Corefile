@@ -1,0 +1,5 @@
+. {
+    file /etc/coredns/allowlist.db
+    log
+    errors
+}

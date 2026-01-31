@@ -4,7 +4,7 @@
     "name": "Dynamic code evaluation",
     "severity": "critical",
     "category": "dangerous_api",
-    "ast_query": "(call_expression function: (identifier) @fn (#eq? @fn \"eval\"))",
+    "patterns": ["eval("],
     "description": "Detects eval() calls that execute arbitrary code"
   },
   {
@@ -12,7 +12,7 @@
     "name": "Function constructor abuse",
     "severity": "critical",
     "category": "dangerous_api",
-    "ast_query": "(new_expression constructor: (identifier) @ctor (#eq? @ctor \"Function\"))",
+    "patterns": ["new Function(", "new Function ("],
     "description": "Detects Function constructor which is equivalent to dynamic code evaluation"
   },
   {
