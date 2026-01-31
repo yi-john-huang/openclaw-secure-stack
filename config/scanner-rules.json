@@ -1,0 +1,58 @@
+[
+  {
+    "id": "DANGEROUS_EVAL",
+    "name": "Dynamic code evaluation",
+    "severity": "critical",
+    "category": "dangerous_api",
+    "ast_query": "(call_expression function: (identifier) @fn (#eq? @fn \"eval\"))",
+    "description": "Detects eval() calls that execute arbitrary code"
+  },
+  {
+    "id": "DANGEROUS_FUNCTION_CTOR",
+    "name": "Function constructor abuse",
+    "severity": "critical",
+    "category": "dangerous_api",
+    "ast_query": "(new_expression constructor: (identifier) @ctor (#eq? @ctor \"Function\"))",
+    "description": "Detects Function constructor which is equivalent to dynamic code evaluation"
+  },
+  {
+    "id": "DANGEROUS_CHILD_PROCESS",
+    "name": "Child process execution",
+    "severity": "critical",
+    "category": "dangerous_api",
+    "patterns": ["child_process", "execSync", "spawnSync", "execFileSync"],
+    "description": "Detects child_process usage for command execution"
+  },
+  {
+    "id": "NETWORK_FETCH",
+    "name": "Outbound fetch request",
+    "severity": "high",
+    "category": "network_exfil",
+    "patterns": ["fetch(", "XMLHttpRequest", "axios", "node-fetch"],
+    "description": "Detects outbound HTTP requests that may exfiltrate data"
+  },
+  {
+    "id": "NETWORK_HTTP_MODULE",
+    "name": "Node HTTP module usage",
+    "severity": "high",
+    "category": "network_exfil",
+    "patterns": ["require(\"http\")", "require(\"https\")", "require('http')", "require('https')"],
+    "description": "Detects usage of Node.js http/https modules"
+  },
+  {
+    "id": "FS_WRITE",
+    "name": "Filesystem write operation",
+    "severity": "high",
+    "category": "fs_abuse",
+    "patterns": ["writeFileSync", "writeFile", "appendFileSync", "appendFile"],
+    "description": "Detects filesystem write operations that may modify system files"
+  },
+  {
+    "id": "FS_DELETE",
+    "name": "Filesystem delete operation",
+    "severity": "high",
+    "category": "fs_abuse",
+    "patterns": ["unlinkSync", "unlink", "rmdirSync", "rmdir", "rmSync"],
+    "description": "Detects filesystem delete operations"
+  }
+]

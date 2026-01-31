@@ -1,0 +1,44 @@
+[
+  {
+    "id": "PI-001",
+    "name": "Ignore previous instructions",
+    "pattern": "(?i)ignore\\s+(all\\s+)?previous\\s+instructions",
+    "action": "strip",
+    "description": "Detects attempts to override system prompt"
+  },
+  {
+    "id": "PI-002",
+    "name": "Role switching",
+    "pattern": "(?i)(you\\s+are\\s+now|act\\s+as|pretend\\s+to\\s+be|from\\s+now\\s+on\\s+you)",
+    "action": "strip",
+    "description": "Detects attempts to change the AI's role"
+  },
+  {
+    "id": "PI-003",
+    "name": "System prompt extraction",
+    "pattern": "(?i)(reveal|show|repeat|print|output)\\s+(your|the)\\s+(system\\s+)?(prompt|instructions|rules)",
+    "action": "reject",
+    "description": "Detects attempts to extract the system prompt"
+  },
+  {
+    "id": "PI-004",
+    "name": "Delimiter injection",
+    "pattern": "(?i)(```|---|\\.\\.\\.)(\\s*)(system|assistant|human|user)\\s*:",
+    "action": "strip",
+    "description": "Detects delimiter-based prompt injection"
+  },
+  {
+    "id": "PI-005",
+    "name": "Disregard rules",
+    "pattern": "(?i)disregard\\s+(your|all|any|the)\\s+(rules|guidelines|instructions|constraints)",
+    "action": "strip",
+    "description": "Detects attempts to bypass AI safety rules"
+  },
+  {
+    "id": "PI-006",
+    "name": "Developer mode",
+    "pattern": "(?i)(developer|debug|admin|maintenance|jailbreak)\\s+mode",
+    "action": "reject",
+    "description": "Detects attempts to enable special modes"
+  }
+]

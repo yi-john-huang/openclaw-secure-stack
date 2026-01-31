@@ -7,3 +7,24 @@
 
 # SDD spec steering (generated templates)
 .spec/steering/
+
+# Environment and secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# SQLite
+*.db
+
+# OS
+.DS_Store
