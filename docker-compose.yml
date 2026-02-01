@@ -35,15 +35,17 @@ services:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
     command: ["node", "dist/index.js", "gateway", "--port", "3000", "--bind", "lan"]
     environment:
+      - HOME=/home/openclaw
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_TOKEN}
     volumes:
-      - openclaw-data:/home/node/.openclaw
+      - openclaw-data:/home/openclaw/.openclaw
     networks:
       - internal
     tty: true
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health',function(r){process.exit(r.statusCode===200?0:1)}).on('error',function(){process.exit(1)})\""]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -63,8 +65,7 @@ services:
     build: docker/egress
     volumes:
       - ./config/egress-allowlist.conf:/etc/coredns/egress-allowlist.conf:ro
-    tmpfs:
-      - /etc/coredns/generated:size=1M
+      - ./config/allowlist.db:/etc/coredns/allowlist.db:ro
     networks:
       internal:
         ipv4_address: 172.28.0.10

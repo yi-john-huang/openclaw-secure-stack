@@ -10,13 +10,6 @@ info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-check_command() {
-    if ! command -v "$1" &>/dev/null; then
-        error "$1 is required but not installed."
-        exit 1
-    fi
-}
-
 # Detect container runtime: docker or podman
 detect_runtime() {
     if command -v docker &>/dev/null; then
@@ -69,7 +62,6 @@ check_compose_version() {
 }
 
 generate_token() {
-    # 32 bytes -> 44 char base64 string
     if command -v openssl &>/dev/null; then
         openssl rand -base64 32
     elif [ -r /dev/urandom ]; then
@@ -77,6 +69,47 @@ generate_token() {
     else
         error "Cannot generate random token: no openssl or /dev/urandom"
         exit 1
+    fi
+}
+
+# Generate CoreDNS zone file from egress allowlist
+generate_zone_file() {
+    local allowlist="config/egress-allowlist.conf"
+    local output="config/allowlist.db"
+
+    if [ ! -f "$allowlist" ]; then
+        error "$allowlist not found"
+        exit 1
+    fi
+
+    {
+        cat <<'ZONE_HEADER'
+$ORIGIN .
+@  IN SOA ns.local. admin.local. (
+       1      ; serial
+       3600   ; refresh
+       900    ; retry
+       86400  ; expire
+       300    ; minimum
+)
+   IN NS  ns.local.
+
+ZONE_HEADER
+        while IFS= read -r domain || [ -n "$domain" ]; do
+            domain=$(echo "$domain" | sed 's/#.*//' | tr -d '[:space:]')
+            [ -z "$domain" ] && continue
+            echo "$domain. IN A 0.0.0.0"
+        done < "$allowlist"
+    } > "$output"
+
+    info "Generated DNS zone file from $allowlist ($(grep -c 'IN A' "$output") domains)"
+}
+
+sed_inplace() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
     fi
 }
 
@@ -99,18 +132,127 @@ main() {
         fi
         cp .env.example .env
         TOKEN=$(generate_token)
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s|OPENCLAW_TOKEN=.*|OPENCLAW_TOKEN=$TOKEN|" .env
-        else
-            sed -i "s|OPENCLAW_TOKEN=.*|OPENCLAW_TOKEN=$TOKEN|" .env
-        fi
+        sed_inplace "s|OPENCLAW_TOKEN=.*|OPENCLAW_TOKEN=$TOKEN|" .env
         info "Generated .env with random API token"
     fi
 
-    # Build and start
+    # Generate DNS zone file
+    generate_zone_file
+
+    # --- LLM Auth Setup (before starting containers) ---
+    echo ""
+    info "=== LLM Authentication Setup ==="
+    echo ""
+    echo "OpenClaw needs credentials for an LLM provider."
+    echo ""
+    echo "  1) API key  — paste an OpenAI or Anthropic API key"
+    echo "  2) OAuth    — interactive browser login (recommended for personal use)"
+    echo ""
+    read -rp "Choose auth method [1/2]: " auth_choice
+
+    local onboard_auth_flags=()
+
+    case "$auth_choice" in
+        1)
+            echo ""
+            echo "  a) OpenAI"
+            echo "  b) Anthropic"
+            read -rp "Which provider? [a/b]: " provider_choice
+            case "$provider_choice" in
+                a)
+                    read -rp "Enter your OpenAI API key: " api_key
+                    sed_inplace "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$api_key|" .env
+                    onboard_auth_flags=(--auth-choice openai-api-key --openai-api-key "$api_key")
+                    info "Saved OpenAI API key"
+                    ;;
+                b)
+                    read -rp "Enter your Anthropic API key: " api_key
+                    sed_inplace "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$api_key|" .env
+                    onboard_auth_flags=(--auth-choice apiKey --anthropic-api-key "$api_key")
+                    info "Saved Anthropic API key"
+                    ;;
+                *)
+                    error "Unknown provider. Please re-run install.sh."
+                    exit 1
+                    ;;
+            esac
+            ;;
+        2)
+            echo ""
+            echo "  a) OpenAI (Codex)"
+            echo "  b) Anthropic"
+            read -rp "Which provider? [a/b]: " provider_choice
+            case "$provider_choice" in
+                a) onboard_auth_flags=(--auth-choice openai-codex) ;;
+                b) onboard_auth_flags=(--auth-choice skip) ;;
+                *) error "Unknown provider. Please re-run install.sh."; exit 1 ;;
+            esac
+            ;;
+        *)
+            error "Invalid choice. Please re-run install.sh."
+            exit 1
+            ;;
+    esac
+
+    # Build containers
     info "Building containers..."
     $COMPOSE_CMD build
 
+    # Read token from .env
+    local gateway_token
+    gateway_token=$(sed -n 's/^OPENCLAW_TOKEN=//p' .env)
+    local openclaw_image
+    openclaw_image=$(sed -n 's/^OPENCLAW_IMAGE=//p' .env)
+    openclaw_image="${openclaw_image:-ghcr.io/openclaw/openclaw:latest}"
+
+    # Ensure the openclaw-data volume exists
+    $CONTAINER_RT volume create openclaw-secure-stack_openclaw-data 2>/dev/null || true
+
+    # Run onboard inside the openclaw image to configure credentials
+    info "Configuring OpenClaw gateway..."
+    if [ "$auth_choice" = "2" ]; then
+        # OAuth: interactive — needs tty
+        $CONTAINER_RT run --rm -it \
+            --user 65534 \
+            -e HOME=/home/openclaw \
+            -v openclaw-secure-stack_openclaw-data:/home/openclaw/.openclaw \
+            "$openclaw_image" \
+            node dist/index.js onboard \
+                --mode local \
+                --gateway-port 3000 \
+                --gateway-bind lan \
+                --gateway-auth token \
+                --gateway-token "$gateway_token" \
+                --skip-daemon \
+                --skip-channels \
+                --skip-skills \
+                --skip-health \
+                --skip-ui \
+                "${onboard_auth_flags[@]}"
+    else
+        # API key: non-interactive
+        $CONTAINER_RT run --rm \
+            --user 65534 \
+            -e HOME=/home/openclaw \
+            -v openclaw-secure-stack_openclaw-data:/home/openclaw/.openclaw \
+            "$openclaw_image" \
+            node dist/index.js onboard \
+                --non-interactive \
+                --accept-risk \
+                --mode local \
+                --gateway-port 3000 \
+                --gateway-bind lan \
+                --gateway-auth token \
+                --gateway-token "$gateway_token" \
+                --skip-daemon \
+                --skip-channels \
+                --skip-skills \
+                --skip-health \
+                --skip-ui \
+                "${onboard_auth_flags[@]}"
+    fi
+
+    # Start all services
     info "Starting services..."
     $COMPOSE_CMD up -d
 
@@ -128,80 +270,21 @@ main() {
     if [ $retries -ge 30 ]; then
         warn "OpenClaw gateway did not become healthy in time."
         warn "Check logs with: $COMPOSE_CMD logs openclaw"
+    else
+        info "OpenClaw gateway is healthy."
     fi
 
     echo ""
-    info "OpenClaw Secure Stack is running!"
-    info "Proxy available at http://localhost:${PROXY_PORT:-8080}"
-    info "API token is in .env (OPENCLAW_TOKEN)"
+    info "=== OpenClaw Secure Stack is running! ==="
+    info "Proxy:       http://localhost:${PROXY_PORT:-8080}"
+    info "Health:      curl http://localhost:${PROXY_PORT:-8080}/health"
+    info "API token:   stored in .env (OPENCLAW_TOKEN)"
     echo ""
-
-    # --- LLM Auth Setup ---
-    info "=== LLM Authentication Setup ==="
-    echo ""
-    echo "OpenClaw needs credentials for an LLM provider (OpenAI or Anthropic)."
-    echo ""
-    echo "  1) API key  — paste an API key (stored in .env)"
-    echo "  2) OAuth    — interactive browser login (recommended for personal use)"
-    echo "  3) Skip     — configure later"
-    echo ""
-    read -rp "Choose auth method [1/2/3]: " auth_choice
-
-    case "$auth_choice" in
-        1)
-            echo ""
-            echo "  a) OpenAI"
-            echo "  b) Anthropic"
-            read -rp "Which provider? [a/b]: " provider_choice
-            case "$provider_choice" in
-                a)
-                    read -rp "Enter your OpenAI API key: " api_key
-                    if [[ "$OSTYPE" == "darwin"* ]]; then
-                        sed -i '' "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$api_key|" .env
-                    else
-                        sed -i "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$api_key|" .env
-                    fi
-                    info "Saved OpenAI API key to .env — restarting containers..."
-                    $COMPOSE_CMD up -d
-                    ;;
-                b)
-                    read -rp "Enter your Anthropic API key: " api_key
-                    if [[ "$OSTYPE" == "darwin"* ]]; then
-                        sed -i '' "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$api_key|" .env
-                    else
-                        sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$api_key|" .env
-                    fi
-                    info "Saved Anthropic API key to .env — restarting containers..."
-                    $COMPOSE_CMD up -d
-                    ;;
-                *)
-                    warn "Unknown provider — skipping. Edit .env manually."
-                    ;;
-            esac
-            ;;
-        2)
-            echo ""
-            info "Starting interactive OAuth login inside the OpenClaw container..."
-            info "Follow the prompts in your browser."
-            local container_name
-            container_name=$($COMPOSE_CMD ps -q openclaw)
-            $CONTAINER_RT exec -it "$container_name" openclaw onboard || {
-                warn "OAuth setup exited with an error. You can retry with:"
-                warn "  $CONTAINER_RT exec -it \$($COMPOSE_CMD ps -q openclaw) openclaw onboard"
-            }
-            ;;
-        3|*)
-            warn "Skipping LLM auth setup. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env,"
-            warn "or run OAuth later with:"
-            warn "  $CONTAINER_RT exec -it \$($COMPOSE_CMD ps -q openclaw) openclaw onboard"
-            ;;
-    esac
-
-    echo ""
-    info "=== Verify ==="
-    info "Health check:  curl http://localhost:${PROXY_PORT:-8080}/health"
-    info "Chat request:  curl -H 'Authorization: Bearer <token>' http://localhost:${PROXY_PORT:-8080}/v1/chat/completions -d '{...}'"
-    info "Your API token is in .env (OPENCLAW_TOKEN)"
+    info "Test with:"
+    info "  curl -X POST http://localhost:${PROXY_PORT:-8080}/v1/chat/completions \\"
+    info "    -H 'Authorization: Bearer $(sed -n "s/^OPENCLAW_TOKEN=//p" .env)' \\"
+    info "    -H 'Content-Type: application/json' \\"
+    info "    -d '{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}'"
 }
 
 main "$@"

@@ -1,5 +1,5 @@
 . {
-    file /etc/coredns/generated/allowlist.db
+    file /etc/coredns/allowlist.db
     log
     errors
 }
