@@ -16,22 +16,41 @@ services:
     networks:
       - internal
     read_only: true
+    tmpfs:
+      - /tmp:size=10M
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     user: "65534"
     depends_on:
-      - openclaw
-      - egress-dns
+      openclaw:
+        condition: service_healthy
+      egress-dns:
+        condition: service_started
     dns:
       - 172.28.0.10
 
   openclaw:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    command: ["node", "dist/index.js", "gateway", "--port", "3000", "--bind", "lan"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - openclaw-data:/home/node/.openclaw
     networks:
       - internal
+    tty: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     read_only: true
+    tmpfs:
+      - /tmp:size=10M
     cap_drop:
       - ALL
     security_opt:
@@ -44,6 +63,8 @@ services:
     build: docker/egress
     volumes:
       - ./config/egress-allowlist.conf:/etc/coredns/egress-allowlist.conf:ro
+    tmpfs:
+      - /etc/coredns/generated:size=1M
     networks:
       internal:
         ipv4_address: 172.28.0.10
@@ -58,6 +79,7 @@ services:
 
 volumes:
   audit-data:
+  openclaw-data:
 
 networks:
   internal:

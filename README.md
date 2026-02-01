@@ -56,8 +56,9 @@ Skills that fail scanning are quarantined. An admin can force-override with expl
 ## Quick Start
 
 ### Prerequisites
-- Docker >= 20.10
+- Docker >= 20.10 (or Podman with `podman-compose` — works as a drop-in replacement)
 - Docker Compose >= 2.0
+- An OpenAI or Anthropic account (API key or OAuth login for the LLM provider)
 
 ### Deploy
 
@@ -72,19 +73,27 @@ This will:
 2. Generate a cryptographically random API token
 3. Create `.env` from `.env.example`
 4. Build and start all containers
+5. Prompt you to configure LLM authentication (API key or OAuth)
 
-Your proxy is now running at `http://localhost:8080`. The API token is in `.env`.
+### LLM Authentication
 
-### Use
+The installer will ask you to choose one of:
+
+- **API key** — paste an OpenAI or Anthropic API key (stored in `.env`)
+- **OAuth** — interactive browser login via `openclaw onboard` (credentials persist in a Docker volume)
+- **Skip** — configure later manually
+
+### Verify
 
 ```bash
-# All requests require the token
-curl -H "Authorization: Bearer $(grep OPENCLAW_TOKEN .env | cut -d= -f2)" \
-     http://localhost:8080/api/chat \
-     -d '{"message": "Hello"}'
-
 # Health check (no auth required)
 curl http://localhost:8080/health
+
+# Chat request (requires token)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $(sed -n 's/^OPENCLAW_TOKEN=//p' .env)" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
 ### Scan a Skill
