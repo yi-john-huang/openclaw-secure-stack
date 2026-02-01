@@ -36,7 +36,7 @@ class PromptSanitizer:
     def load_rules(self, rules_path: str) -> None:
         path = Path(rules_path)
         if not path.exists():
-            return
+            raise FileNotFoundError(f"Prompt rules file not found: {rules_path}")
         raw = json.loads(path.read_text())
         self._rules = [SanitizationRule.model_validate(r) for r in raw]
         self._compiled = [

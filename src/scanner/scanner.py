@@ -150,7 +150,7 @@ def _find_js_files(skill_path: str) -> list[Path]:
     """Find all JS/TS files in a skill path."""
     path = Path(skill_path)
     if path.is_file():
-        return [path] if path.suffix in (".js", ".ts", ".mjs", ".cjs") else [path]
+        return [path] if path.suffix in (".js", ".ts", ".mjs", ".cjs") else []
     return sorted(
         f
         for f in path.rglob("*")
