@@ -113,6 +113,11 @@ sed_inplace() {
     fi
 }
 
+# Escape special characters for use in a sed replacement string.
+sed_escape_rhs() {
+    printf '%s' "$1" | sed 's/[&|/\]/\\&/g'
+}
+
 main() {
     info "OpenClaw Secure Stack Installer"
     echo ""
@@ -161,13 +166,13 @@ main() {
             case "$provider_choice" in
                 a)
                     read -rp "Enter your OpenAI API key: " api_key
-                    sed_inplace "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$api_key|" .env
+                    sed_inplace "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$(sed_escape_rhs "$api_key")|" .env
                     onboard_auth_flags=(--auth-choice openai-api-key --openai-api-key "$api_key")
                     info "Saved OpenAI API key"
                     ;;
                 b)
                     read -rp "Enter your Anthropic API key: " api_key
-                    sed_inplace "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$api_key|" .env
+                    sed_inplace "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$(sed_escape_rhs "$api_key")|" .env
                     onboard_auth_flags=(--auth-choice apiKey --anthropic-api-key "$api_key")
                     info "Saved Anthropic API key"
                     ;;
