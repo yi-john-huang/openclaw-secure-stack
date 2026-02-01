@@ -57,6 +57,7 @@ def create_app(
         headers = dict(request.headers)
         headers.pop("host", None)
         headers.pop("authorization", None)
+        headers.pop("content-length", None)
         headers["authorization"] = f"Bearer {token}"
 
         body = await request.body()
