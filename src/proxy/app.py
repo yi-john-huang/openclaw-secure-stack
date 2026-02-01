@@ -75,10 +75,19 @@ def create_app(
                     content=body,
                     timeout=30.0,
                 )
+                # Strip hop-by-hop headers and content-length/transfer-encoding
+                # so Starlette sets the correct content-length for the actual body.
+                fwd_headers = {
+                    k: v for k, v in resp.headers.items()
+                    if k.lower() not in (
+                        "content-length", "transfer-encoding",
+                        "connection", "keep-alive",
+                    )
+                }
                 return Response(
                     content=resp.content,
                     status_code=resp.status_code,
-                    headers=dict(resp.headers),
+                    headers=fwd_headers,
                 )
         except (httpx.ConnectError, httpx.TimeoutException):
             return JSONResponse({"error": "Upstream unavailable"}, status_code=502)
