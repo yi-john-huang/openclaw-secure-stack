@@ -1,0 +1,37 @@
+[
+  {
+    "id": "IPI-001",
+    "name": "Hidden instruction in tool output",
+    "pattern": "(?i)(ignore|disregard|override)\\s+(all\\s+)?(previous|prior|above|earlier)\\s+(instructions|prompts|directives|context)",
+    "action": "strip",
+    "description": "Detects hidden instructions embedded in fetched content or tool output"
+  },
+  {
+    "id": "IPI-002",
+    "name": "Role hijack in fetched content",
+    "pattern": "(?i)(you\\s+are\\s+now|your\\s+new\\s+role\\s+is|system:\\s*you|from\\s+now\\s+on,?\\s+you\\s+are|new\\s+instructions?:\\s*you)",
+    "action": "strip",
+    "description": "Detects role hijacking attempts in web pages and tool results"
+  },
+  {
+    "id": "IPI-003",
+    "name": "Data exfiltration instruction",
+    "pattern": "(?i)(send|exfiltrate|transmit|forward|leak|post)\\s+.{0,40}(api[\\s_-]?key|token|secret|credential|password|private[\\s_-]?key)",
+    "action": "flag",
+    "description": "Detects instructions to exfiltrate sensitive data"
+  },
+  {
+    "id": "IPI-004",
+    "name": "Invisible text injection",
+    "pattern": "(?i)(display\\s*:\\s*none|visibility\\s*:\\s*hidden|font-size\\s*:\\s*0|opacity\\s*:\\s*0|position\\s*:\\s*absolute\\s*;[^}]*left\\s*:\\s*-\\d{4,})",
+    "action": "strip",
+    "description": "Detects CSS-hidden text used to inject invisible instructions"
+  },
+  {
+    "id": "IPI-005",
+    "name": "Encoded payload execution",
+    "pattern": "(?i)(eval|exec|function)\\s*\\(\\s*.{0,60}(atob|base64[_-]?decode|Buffer\\.from)",
+    "action": "flag",
+    "description": "Detects dynamic code execution with base64 decode payloads"
+  }
+]

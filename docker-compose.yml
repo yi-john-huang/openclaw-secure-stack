@@ -11,6 +11,7 @@ services:
       - RULES_PATH=/app/config/scanner-rules.json
       - PROMPT_RULES_PATH=/app/config/prompt-rules.json
       - AUDIT_LOG_PATH=/app/data/audit.jsonl
+      - INDIRECT_RULES_PATH=/app/config/indirect-injection-rules.json
     volumes:
       - audit-data:/app/data
     networks:
@@ -44,6 +45,8 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
     volumes:
       - openclaw-data:/home/openclaw/.openclaw
+      - ./plugins/prompt-guard:/home/openclaw/plugins/prompt-guard:ro
+      - ./config/indirect-injection-rules.json:/home/openclaw/config/indirect-injection-rules.json:ro
     networks:
       - internal
       - egress

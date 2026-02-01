@@ -275,6 +275,10 @@ main() {
           c.gateway.trustedProxies = ['172.28.0.0/16'];
           c.gateway.controlUi = c.gateway.controlUi || {};
           c.gateway.controlUi.allowInsecureAuth = true;
+          c.plugins = c.plugins || [];
+          if (!c.plugins.some(function(p2) { return p2.name === 'prompt-guard'; })) {
+            c.plugins.push({ name: 'prompt-guard', path: '/home/openclaw/plugins/prompt-guard', enabled: true });
+          }
           fs.writeFileSync(p, JSON.stringify(c, null, 2));
         "
 

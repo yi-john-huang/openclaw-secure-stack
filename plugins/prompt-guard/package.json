@@ -1,0 +1,9 @@
+{
+  "name": "openclaw-prompt-guard",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin that sanitizes tool results against indirect prompt injection",
+  "main": "index.ts",
+  "openclaw": {
+    "hooks": ["tool_result_persist"]
+  }
+}

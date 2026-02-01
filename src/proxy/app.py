@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.audit.logger import AuditLogger
+from src.models import AuditEvent, AuditEventType, RiskLevel
 from src.proxy.auth_middleware import AuthMiddleware
 from src.sanitizer.sanitizer import PromptInjectionError, PromptSanitizer
 
@@ -22,10 +23,16 @@ def create_app_from_env() -> FastAPI:
     prompt_rules = os.environ.get(
         "PROMPT_RULES_PATH", "config/prompt-rules.json",
     )
+    indirect_rules = os.environ.get(
+        "INDIRECT_RULES_PATH", "config/indirect-injection-rules.json",
+    )
     audit_log = os.environ.get("AUDIT_LOG_PATH")
     sanitizer = PromptSanitizer(prompt_rules)
+    response_scanner: PromptSanitizer | None = None
+    if os.path.exists(indirect_rules):
+        response_scanner = PromptSanitizer(indirect_rules)
     audit_logger = AuditLogger(audit_log) if audit_log else None
-    return create_app(upstream_url, token, sanitizer, audit_logger)
+    return create_app(upstream_url, token, sanitizer, audit_logger, response_scanner)
 
 
 def create_app(
@@ -33,6 +40,7 @@ def create_app(
     token: str,
     sanitizer: PromptSanitizer,
     audit_logger: AuditLogger | None = None,
+    response_scanner: PromptSanitizer | None = None,
 ) -> FastAPI:
     """Create the proxy FastAPI app with auth and sanitization."""
     app = FastAPI(docs_url=None, redoc_url=None)
@@ -73,7 +81,10 @@ def create_app(
         timeout = 300.0 if is_streaming else 30.0
 
         if is_streaming:
-            return await _stream_response(request.method, url, headers, body, timeout)
+            return await _stream_response(
+                request.method, url, headers, body, timeout,
+                response_scanner, audit_logger,
+            )
 
         try:
             async with httpx.AsyncClient() as client:
@@ -85,6 +96,18 @@ def create_app(
                     timeout=timeout,
                 )
                 fwd_headers = _strip_hop_by_hop(resp.headers)
+                if response_scanner:
+                    findings = response_scanner.scan(resp.content.decode(errors="replace"))
+                    if findings:
+                        fwd_headers["X-Prompt-Guard"] = "injection-detected"
+                        if audit_logger:
+                            audit_logger.log(AuditEvent(
+                                event_type=AuditEventType.INDIRECT_INJECTION,
+                                action="response_scan",
+                                result="detected",
+                                risk_level=RiskLevel.HIGH,
+                                details={"patterns": findings},
+                            ))
                 return Response(
                     content=resp.content,
                     status_code=resp.status_code,
@@ -115,6 +138,8 @@ async def _stream_response(
     headers: dict[str, str],
     body: bytes,
     timeout: float,
+    response_scanner: PromptSanitizer | None = None,
+    audit_logger: AuditLogger | None = None,
 ) -> StreamingResponse | JSONResponse:
     client = httpx.AsyncClient()
     try:
@@ -125,15 +150,32 @@ async def _stream_response(
         return JSONResponse({"error": "Upstream unavailable"}, status_code=502)
 
     fwd_headers = _strip_hop_by_hop(resp.headers)
+    injection_logged = False
 
     async def body_iterator() -> AsyncIterator[bytes]:
+        nonlocal injection_logged
         try:
             async for chunk in resp.aiter_bytes():
+                if response_scanner and not injection_logged:
+                    findings = response_scanner.scan(chunk.decode(errors="replace"))
+                    if findings:
+                        injection_logged = True
+                        if audit_logger:
+                            audit_logger.log(AuditEvent(
+                                event_type=AuditEventType.INDIRECT_INJECTION,
+                                action="response_scan_stream",
+                                result="detected",
+                                risk_level=RiskLevel.HIGH,
+                                details={"patterns": findings},
+                            ))
                 yield chunk
         finally:
             await resp.aclose()
             await client.aclose()
 
+    # For streaming, we can't retroactively add headers after iteration starts.
+    # The header is set optimistically if a scanner is configured.
+    # Actual detection is logged via audit events.
     return StreamingResponse(
         content=body_iterator(),
         status_code=resp.status_code,

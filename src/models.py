@@ -24,6 +24,7 @@ class AuditEventType(str, Enum):
     SKILL_QUARANTINE = "skill_quarantine"
     SKILL_OVERRIDE = "skill_override"
     PROMPT_INJECTION = "prompt_injection"
+    INDIRECT_INJECTION = "indirect_injection"
     EGRESS_BLOCKED = "egress_blocked"
 
 

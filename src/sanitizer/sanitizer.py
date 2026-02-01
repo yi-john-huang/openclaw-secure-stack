@@ -76,3 +76,11 @@ class PromptSanitizer:
             injection_detected=injection_detected,
             patterns=detected_patterns,
         )
+
+    def scan(self, text: str) -> list[str]:
+        """Detect-only scan — returns list of matched rule names without modifying text."""
+        findings: list[str] = []
+        for rule, pattern in self._compiled:
+            if pattern.search(text):
+                findings.append(rule.name)
+        return findings
