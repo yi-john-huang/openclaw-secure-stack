@@ -43,6 +43,8 @@ def create_app(
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     async def proxy(request: Request, path: str) -> Response:
         url = f"{upstream_url.rstrip('/')}/{path}"
+        if request.url.query:
+            url = f"{url}?{request.url.query}"
         headers = dict(request.headers)
         headers.pop("host", None)
         headers.pop("authorization", None)
@@ -78,7 +80,7 @@ def create_app(
                     status_code=resp.status_code,
                     headers=dict(resp.headers),
                 )
-        except httpx.ConnectError:
+        except (httpx.ConnectError, httpx.TimeoutException):
             return JSONResponse({"error": "Upstream unavailable"}, status_code=502)
 
     # Add auth middleware (wraps the entire app)

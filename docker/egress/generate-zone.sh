@@ -4,7 +4,7 @@
 set -e
 
 ALLOWLIST="${1:-/etc/coredns/egress-allowlist.conf}"
-OUTPUT="${2:-/etc/coredns/allowlist.db}"
+OUTPUT="${2:-/etc/coredns/generated/allowlist.db}"
 
 echo ". SOA ns.local admin.local 1 3600 900 86400 300" > "$OUTPUT"
 echo ". NS ns.local" >> "$OUTPUT"
