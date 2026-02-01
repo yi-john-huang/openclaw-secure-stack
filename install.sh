@@ -63,9 +63,9 @@ check_compose_version() {
 
 generate_token() {
     if command -v openssl &>/dev/null; then
-        openssl rand -base64 32
+        openssl rand -base64 32 | tr -d '='
     elif [ -r /dev/urandom ]; then
-        head -c 32 /dev/urandom | base64
+        head -c 32 /dev/urandom | base64 | tr -d '='
     else
         error "Cannot generate random token: no openssl or /dev/urandom"
         exit 1
