@@ -179,13 +179,13 @@ main() {
             ;;
         2)
             echo ""
-            echo "  a) OpenAI (Codex)"
-            echo "  b) Anthropic"
-            read -rp "Which provider? [a/b]: " provider_choice
-            case "$provider_choice" in
-                a) onboard_auth_flags=(--auth-choice openai-codex) ;;
-                b) onboard_auth_flags=(--auth-choice skip) ;;
-                *) error "Unknown provider. Please re-run install.sh."; exit 1 ;;
+            warn "OAuth is only available for OpenAI (Codex). Anthropic does not"
+            warn "support OAuth for third-party applications — use an API key instead."
+            echo ""
+            read -rp "Continue with OpenAI OAuth? [y/N]: " oauth_confirm
+            case "$oauth_confirm" in
+                y|Y) onboard_auth_flags=(--auth-choice openai-codex) ;;
+                *) error "Cancelled. Please re-run install.sh and choose option 1 for API key."; exit 1 ;;
             esac
             ;;
         *)

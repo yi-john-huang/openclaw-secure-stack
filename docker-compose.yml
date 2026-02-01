@@ -64,7 +64,6 @@ services:
   egress-dns:
     build: docker/egress
     volumes:
-      - ./config/egress-allowlist.conf:/etc/coredns/egress-allowlist.conf:ro
       - ./config/allowlist.db:/etc/coredns/allowlist.db:ro
     networks:
       internal:
