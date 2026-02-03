@@ -88,7 +88,6 @@ class AuditLogger:
 
     def log(self, event: AuditEvent) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self._maybe_rotate()
 
         # Compute prev_hash for hash chain
         prev_hash: str | None = None
@@ -100,11 +99,16 @@ class AuditLogger:
         data["prev_hash"] = prev_hash
         line = json.dumps(data, separators=(",", ":"))
 
-        with open(self.log_path, "a") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
+        # Use a lock file for atomic rotation + write
+        lock_file = self.log_path.parent / f".{self.log_path.name}.lock"
+        with open(lock_file, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
             try:
-                f.write(line + "\n")
+                # Rotation check inside lock to prevent race condition
+                self._maybe_rotate()
+                with open(self.log_path, "a") as f:
+                    f.write(line + "\n")
             finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
+                fcntl.flock(lf, fcntl.LOCK_UN)
 
         self._last_line = line
