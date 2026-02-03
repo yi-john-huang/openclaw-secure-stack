@@ -1,6 +1,6 @@
 [project]
 name = "openclaw-secure-stack"
-version = "0.1.0"
+version = "1.0.0"
 description = "Secure Docker-based deployment wrapper for OpenClaw AI agent"
 requires-python = ">=3.12"
 dependencies = [
