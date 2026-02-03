@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from tree_sitter import Tree
+from typing import TYPE_CHECKING
 
 from src.models import ScanFinding, Severity
-from src.scanner.scanner import ScanRule
+from src.scanner.rules.base import ASTScanRule
+
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 FS_WRITE_METHODS = {
     "writeFileSync", "writeFile", "appendFileSync", "appendFile",
@@ -17,20 +20,18 @@ FS_DELETE_METHODS = {
 FS_ALL_DANGEROUS = FS_WRITE_METHODS | FS_DELETE_METHODS
 
 
-class FSAbuseRule(ScanRule):
+class FSAbuseRule(ASTScanRule):
     id = "FS_ABUSE"
     name = "Filesystem abuse"
     severity = Severity.HIGH
 
-    def detect(self, tree: Tree, source: bytes, file_path: str) -> list[ScanFinding]:
-        findings: list[ScanFinding] = []
-        source_str = source.decode("utf-8", errors="replace")
-        lines = source_str.split("\n")
-
-        self._walk(tree.root_node, findings, lines, file_path)
-        return findings
-
-    def _walk(self, node, findings, lines, file_path):  # noqa: ANN001
+    def _walk(
+        self,
+        node: Node,
+        findings: list[ScanFinding],
+        lines: list[str],
+        file_path: str,
+    ) -> None:
         # Detect fs.writeFileSync(), fs.unlink(), etc.
         if node.type == "call_expression":
             func = node.child_by_field_name("function")
@@ -76,10 +77,9 @@ class FSAbuseRule(ScanRule):
                                 f"Filesystem module import: {val}",
                             ))
 
-        for child in node.children:
-            self._walk(child, findings, lines, file_path)
+        self._walk_children(node, findings, lines, file_path)
 
-    def _writes_to_absolute_path(self, call_node) -> bool:  # noqa: ANN001
+    def _writes_to_absolute_path(self, call_node: Node) -> bool:
         """Check if the first argument to a write call is an absolute path string."""
         args = call_node.child_by_field_name("arguments")
         if args and args.named_child_count > 0:
@@ -88,19 +88,3 @@ class FSAbuseRule(ScanRule):
                 val = first_arg.text.decode().strip("'\"")
                 return val.startswith("/")
         return False
-
-    def _make_finding(self, node, lines, file_path, message):  # noqa: ANN001
-        line_num = node.start_point[0] + 1
-        col = node.start_point[1]
-        row = node.start_point[0]
-        snippet = lines[row].strip()[:200] if row < len(lines) else ""
-        return ScanFinding(
-            rule_id=self.id,
-            rule_name=self.name,
-            severity=self.severity,
-            file=file_path,
-            line=line_num,
-            column=col,
-            snippet=snippet,
-            message=message,
-        )

@@ -8,6 +8,9 @@
 # SDD spec steering (generated templates)
 .spec/steering/
 
+# Serena MCP cache
+.serena/
+
 # Environment and secrets
 .env
 

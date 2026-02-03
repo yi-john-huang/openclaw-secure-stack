@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from tree_sitter import Tree
 
 from src.models import ScanFinding, Severity
-from src.scanner.scanner import ScanRule
+from src.scanner.rules.base import ASTScanRule
+
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 # Default allowlisted domains (can be overridden via config)
 DEFAULT_ALLOWLIST = {"api.openai.com", "api.anthropic.com"}
@@ -19,7 +23,7 @@ NETWORK_MODULES = {"http", "https", "net", "dgram", "node-fetch", "got", "reques
 URL_PATTERN = re.compile(r"""https?://([a-zA-Z0-9.-]+)""")
 
 
-class NetworkExfilRule(ScanRule):
+class NetworkExfilRule(ASTScanRule):
     id = "NETWORK_EXFIL"
     name = "Network exfiltration"
     severity = Severity.HIGH
@@ -28,14 +32,31 @@ class NetworkExfilRule(ScanRule):
         self.allowlist = allowlist or DEFAULT_ALLOWLIST
 
     def detect(self, tree: Tree, source: bytes, file_path: str) -> list[ScanFinding]:
+        """Override detect to pass source_str for URL extraction."""
         findings: list[ScanFinding] = []
         source_str = source.decode("utf-8", errors="replace")
         lines = source_str.split("\n")
-
-        self._walk(tree.root_node, findings, lines, file_path, source_str)
+        self._walk_with_source(tree.root_node, findings, lines, file_path, source_str)
         return findings
 
-    def _walk(self, node, findings, lines, file_path, source_str):  # noqa: ANN001
+    def _walk(
+        self,
+        node: Node,
+        findings: list[ScanFinding],
+        lines: list[str],
+        file_path: str,
+    ) -> None:
+        """Not used - this rule uses _walk_with_source instead."""
+        pass
+
+    def _walk_with_source(
+        self,
+        node: Node,
+        findings: list[ScanFinding],
+        lines: list[str],
+        file_path: str,
+        source_str: str,
+    ) -> None:
         # Detect fetch(), axios(), XMLHttpRequest usage
         if node.type == "call_expression":
             func = node.child_by_field_name("function")
@@ -74,9 +95,9 @@ class NetworkExfilRule(ScanRule):
                             ))
 
         for child in node.children:
-            self._walk(child, findings, lines, file_path, source_str)
+            self._walk_with_source(child, findings, lines, file_path, source_str)
 
-    def _is_allowlisted_call(self, call_node, source_str: str) -> bool:  # noqa: ANN001
+    def _is_allowlisted_call(self, call_node: Node, source_str: str) -> bool:
         """Check if a network call targets an allowlisted domain."""
         # Extract the source text of the call to look for URLs
         start = call_node.start_byte
@@ -85,22 +106,6 @@ class NetworkExfilRule(ScanRule):
 
         urls = URL_PATTERN.findall(call_text)
         if not urls:
-            return False  # Unknown destination → not allowlisted
+            return False  # Unknown destination -> not allowlisted
 
         return all(domain in self.allowlist for domain in urls)
-
-    def _make_finding(self, node, lines, file_path, message):  # noqa: ANN001
-        line_num = node.start_point[0] + 1
-        col = node.start_point[1]
-        row = node.start_point[0]
-        snippet = lines[row].strip()[:200] if row < len(lines) else ""
-        return ScanFinding(
-            rule_id=self.id,
-            rule_name=self.name,
-            severity=self.severity,
-            file=file_path,
-            line=line_num,
-            column=col,
-            snippet=snippet,
-            message=message,
-        )

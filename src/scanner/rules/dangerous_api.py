@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from tree_sitter import Tree
+from typing import TYPE_CHECKING
 
 from src.models import ScanFinding, Severity
-from src.scanner.scanner import ScanRule
+from src.scanner.rules.base import ASTScanRule
+
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 # Patterns that indicate dangerous dynamic code execution
 DANGEROUS_IDENTIFIERS = {"eval", "Function"}
@@ -13,20 +16,18 @@ DANGEROUS_REQUIRES = {"child_process"}
 DANGEROUS_METHODS = {"exec", "execSync", "spawn", "spawnSync", "execFile", "execFileSync"}
 
 
-class DangerousAPIRule(ScanRule):
+class DangerousAPIRule(ASTScanRule):
     id = "DANGEROUS_API"
     name = "Dangerous dynamic code API"
     severity = Severity.CRITICAL
 
-    def detect(self, tree: Tree, source: bytes, file_path: str) -> list[ScanFinding]:
-        findings: list[ScanFinding] = []
-        source_str = source.decode("utf-8", errors="replace")
-        lines = source_str.split("\n")
-
-        self._walk(tree.root_node, findings, lines, file_path)
-        return findings
-
-    def _walk(self, node, findings, lines, file_path):  # noqa: ANN001
+    def _walk(
+        self,
+        node: Node,
+        findings: list[ScanFinding],
+        lines: list[str],
+        file_path: str,
+    ) -> None:
         # Check call expressions: eval(...), exec(...)
         if node.type == "call_expression" and node.child_by_field_name("function"):
             func_node = node.child_by_field_name("function")
@@ -66,21 +67,4 @@ class DangerousAPIRule(ScanRule):
                             findings.append(self._make_finding(arg, lines, file_path,
                                                                f"Dangerous require: {val}"))
 
-        for child in node.children:
-            self._walk(child, findings, lines, file_path)
-
-    def _make_finding(self, node, lines, file_path, message):  # noqa: ANN001
-        line_num = node.start_point[0] + 1
-        col = node.start_point[1]
-        row = node.start_point[0]
-        snippet = lines[row].strip()[:200] if row < len(lines) else ""
-        return ScanFinding(
-            rule_id=self.id,
-            rule_name=self.name,
-            severity=self.severity,
-            file=file_path,
-            line=line_num,
-            column=col,
-            snippet=snippet,
-            message=message,
-        )
+        self._walk_children(node, findings, lines, file_path)

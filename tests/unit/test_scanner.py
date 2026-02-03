@@ -16,12 +16,6 @@ from src.scanner.scanner import (
 )
 
 
-def _create_skill(tmp_path: Path, filename: str, content: bytes) -> Path:
-    skill_file = tmp_path / filename
-    skill_file.write_bytes(content)
-    return skill_file
-
-
 class TestLoadRules:
     def test_load_rules_from_config(self):
         config = [
@@ -54,37 +48,41 @@ class TestSkillScanner:
         rules = load_rules_from_config(config)
         return SkillScanner(rules=rules, audit_logger=MagicMock())
 
-    def test_scan_returns_report_with_findings(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "malicious.js", b'const x = eval("pwned");')
+    def test_scan_returns_report_with_findings(self, tmp_skill):
+        # Note: This test intentionally uses a dangerous pattern to test the scanner
+        skill = tmp_skill("malicious.js", b'const x = eval("pwned");')
         scanner = self._make_scanner()
         report = scanner.scan(str(skill))
         assert len(report.findings) >= 1
         assert len(report.checksum) == 64
 
-    def test_scan_clean_skill_no_findings(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "safe.js", b'console.log("hello");')
+    def test_scan_clean_skill_no_findings(self, tmp_skill):
+        skill = tmp_skill("safe.js", b'console.log("hello");')
         scanner = self._make_scanner()
         report = scanner.scan(str(skill))
         assert len(report.findings) == 0
 
-    def test_scan_all_scans_directory(self, tmp_path: Path):
-        _create_skill(tmp_path, "a.js", b"var x = 1;")
-        _create_skill(tmp_path, "b.js", b"var y = 2;")
-        _create_skill(tmp_path, "c.js", b"var z = 3;")
+    def test_scan_all_scans_directory(self, tmp_skill):
+        tmp_skill("a.js", b"var x = 1;")
+        tmp_skill("b.js", b"var y = 2;")
+        tmp_skill("c.js", b"var z = 3;")
+        # Get the skills directory from one of the created files
+        skill = tmp_skill("dummy.js", b"")
+        skills_dir = skill.parent
         scanner = self._make_scanner()
-        reports = scanner.scan_all(str(tmp_path))
-        assert len(reports) == 3
+        reports = scanner.scan_all(str(skills_dir))
+        assert len(reports) == 4  # Including dummy.js
 
-    def test_scan_checksum_changes_on_modification(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "test.js", b"var x = 1;")
+    def test_scan_checksum_changes_on_modification(self, tmp_skill):
+        skill = tmp_skill("test.js", b"var x = 1;")
         scanner = self._make_scanner()
         report1 = scanner.scan(str(skill))
         skill.write_bytes(b"var x = 2;")
         report2 = scanner.scan(str(skill))
         assert report1.checksum != report2.checksum
 
-    def test_scan_logs_audit_event(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "test.js", b"var x = 1;")
+    def test_scan_logs_audit_event(self, tmp_skill):
+        skill = tmp_skill("test.js", b"var x = 1;")
         mock_logger = MagicMock()
         config = [
             {"id": "T", "name": "T", "severity": "low", "patterns": ["xxx"], "description": "t"},
@@ -107,16 +105,16 @@ class TestPinVerification:
             pins_loaded=pin_data is not None,
         )
 
-    def test_verify_pin_matching_hash(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+    def test_verify_pin_matching_hash(self, tmp_skill):
+        skill = tmp_skill("skill.js", b"console.log('hi')")
         digest = hashlib.sha256(skill.read_bytes()).hexdigest()
         pins = {"skill.js": {"sha256": digest}}
         scanner = self._make_scanner(pin_data=pins)
         result = scanner._verify_pin(skill, "skill.js", checksum=digest)
         assert result.status == "verified"
 
-    def test_verify_pin_mismatch(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+    def test_verify_pin_mismatch(self, tmp_skill):
+        skill = tmp_skill("skill.js", b"console.log('hi')")
         digest = hashlib.sha256(skill.read_bytes()).hexdigest()
         pins = {"skill.js": {"sha256": "wrong"}}
         scanner = self._make_scanner(pin_data=pins)
@@ -124,15 +122,15 @@ class TestPinVerification:
         assert result.status == "mismatch"
         assert result.expected == "wrong"
 
-    def test_verify_pin_unpinned(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+    def test_verify_pin_unpinned(self, tmp_skill):
+        skill = tmp_skill("skill.js", b"console.log('hi')")
         digest = hashlib.sha256(skill.read_bytes()).hexdigest()
         scanner = self._make_scanner(pin_data={})
         result = scanner._verify_pin(skill, "skill.js", checksum=digest)
         assert result.status == "unpinned"
 
-    def test_scan_reports_mismatch_as_critical_finding(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+    def test_scan_reports_mismatch_as_critical_finding(self, tmp_skill):
+        skill = tmp_skill("skill.js", b"console.log('hi')")
         pins = {"skill.js": {"sha256": "wrong"}}
         scanner = self._make_scanner(pin_data=pins)
         report = scanner.scan(str(skill))
@@ -142,8 +140,8 @@ class TestPinVerification:
 
 
 class TestTrustScoreWiring:
-    def test_scan_includes_trust_score(self, tmp_path: Path):
-        skill = _create_skill(tmp_path, "test.js", b"var x = 1;")
+    def test_scan_includes_trust_score(self, tmp_skill):
+        skill = tmp_skill("test.js", b"var x = 1;")
         config = [
             {"id": "T", "name": "T", "severity": "low", "patterns": ["xxx"], "description": "t"},
         ]
