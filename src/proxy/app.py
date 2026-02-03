@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from src.audit.logger import AuditLogger
 from src.models import AuditEvent, AuditEventType, RiskLevel
 from src.proxy.auth_middleware import AuthMiddleware
+from src.quarantine.manager import QuarantineBlockedError, QuarantineManager
 from src.sanitizer.sanitizer import PromptInjectionError, PromptSanitizer
 
 
@@ -41,6 +42,7 @@ def create_app(
     sanitizer: PromptSanitizer,
     audit_logger: AuditLogger | None = None,
     response_scanner: PromptSanitizer | None = None,
+    quarantine_manager: QuarantineManager | None = None,
 ) -> FastAPI:
     """Create the proxy FastAPI app with auth and sanitization."""
     app = FastAPI(docs_url=None, redoc_url=None)
@@ -51,6 +53,19 @@ def create_app(
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     async def proxy(request: Request, path: str) -> Response:
+        # Check quarantine enforcement for skill invocation paths
+        if quarantine_manager and path.startswith("skills/"):
+            parts = path.split("/")
+            if len(parts) >= 2:
+                skill_name = parts[1]
+                try:
+                    quarantine_manager.enforce_quarantine(skill_name)
+                except QuarantineBlockedError:
+                    return JSONResponse(
+                        {"error": {"message": f"Skill '{skill_name}' is quarantined"}},
+                        status_code=403,
+                    )
+
         url = f"{upstream_url.rstrip('/')}/{path}"
         if request.url.query:
             url = f"{url}?{request.url.query}"

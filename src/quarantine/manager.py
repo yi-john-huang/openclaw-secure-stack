@@ -20,6 +20,14 @@ from src.quarantine.db import QuarantineDB
 from src.scanner.scanner import SkillScanner
 
 
+class QuarantineBlockedError(Exception):
+    """Raised when attempting to execute a quarantined skill."""
+
+    def __init__(self, skill_name: str) -> None:
+        super().__init__(f"Skill '{skill_name}' is quarantined and cannot execute")
+        self.skill_name = skill_name
+
+
 class QuarantineManager:
     """Manages quarantine, override, and re-scan of flagged skills."""
 
@@ -42,6 +50,7 @@ class QuarantineManager:
         shutil.move(str(src), str(dest))
 
         findings_json = json.dumps([f.model_dump() for f in report.findings])
+        trust_score = report.trust_score.overall if report.trust_score else None
         self.db.upsert_skill(
             name=report.skill_name,
             path=str(dest),
@@ -49,6 +58,7 @@ class QuarantineManager:
             status="quarantined",
             findings_json=findings_json,
             last_scanned=report.scanned_at,
+            trust_score=trust_score,
         )
 
         if self.audit_logger:
@@ -59,6 +69,19 @@ class QuarantineManager:
                 risk_level=RiskLevel.HIGH,
                 details={"skill_name": report.skill_name, "findings": len(report.findings)},
             ))
+
+    def enforce_quarantine(self, skill_name: str) -> None:
+        """Raise QuarantineBlockedError if skill is quarantined."""
+        skill = self.db.get_skill(skill_name)
+        if skill and skill["status"] == "quarantined":
+            if self.audit_logger:
+                self.audit_logger.log(AuditEvent(
+                    event_type=AuditEventType.SKILL_QUARANTINE,
+                    action=f"Blocked execution of quarantined skill: {skill_name}",
+                    result="blocked",
+                    risk_level=RiskLevel.HIGH,
+                ))
+            raise QuarantineBlockedError(skill_name)
 
     def is_quarantined(self, skill_name: str) -> bool:
         skill = self.db.get_skill(skill_name)

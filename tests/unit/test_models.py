@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from src.models import (
     AuditEvent,
     AuditEventType,
+    PinResult,
     RiskLevel,
     SanitizationRule,
     SanitizeResult,
@@ -160,6 +161,32 @@ class TestAuditEvent:
         assert event.source_ip is None
         assert event.user_id is None
         assert event.details is None
+
+
+class TestPinResult:
+    def test_verified_status(self):
+        r = PinResult(status="verified")
+        assert r.status == "verified"
+        assert r.expected is None
+        assert r.actual is None
+
+    def test_mismatch_status(self):
+        r = PinResult(status="mismatch", expected="aaa", actual="bbb")
+        assert r.expected == "aaa"
+        assert r.actual == "bbb"
+
+    def test_unpinned_status(self):
+        r = PinResult(status="unpinned")
+        assert r.status == "unpinned"
+
+    def test_is_frozen(self):
+        r = PinResult(status="verified")
+        with pytest.raises(ValidationError):
+            r.status = "mismatch"  # type: ignore[misc]
+
+    def test_invalid_status_rejected(self):
+        with pytest.raises(ValidationError):
+            PinResult(status="invalid")
 
 
 class TestSanitizeResult:

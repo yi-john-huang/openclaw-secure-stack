@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +35,17 @@ class RiskLevel(str, Enum):
     MEDIUM = "medium"
     LOW = "low"
     INFO = "info"
+
+
+# --- Pin Verification Models ---
+
+
+class PinResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    status: Literal["verified", "mismatch", "unpinned"]
+    expected: str | None = None
+    actual: str | None = None
 
 
 # --- Scanner Models ---

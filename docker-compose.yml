@@ -35,8 +35,8 @@ services:
   openclaw:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
     command: ["node", "dist/index.js", "gateway", "--port", "3000", "--bind", "lan"]
-    ports:
-      - "3000:3000"
+    # No published ports — only reachable from proxy via internal network.
+    # For debug access, add ports via docker-compose.override.yml.
     environment:
       - HOME=/home/openclaw
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

@@ -1,5 +1,7 @@
 # Stage 1: Build dependencies with uv
-FROM python:3.12-slim AS builder
+# Pin base image by digest for reproducible builds. Update digest periodically.
+# To find latest: docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+FROM python:3.12-slim@sha256:5dc6f84b5e97bfb0c90abfb7c55f3cacc668cb30b4560e27e0c92a3a32e8c34d AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -12,7 +14,7 @@ COPY config/ config/
 RUN uv sync --frozen --no-dev
 
 # Stage 2: Hardened minimal runtime
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:5dc6f84b5e97bfb0c90abfb7c55f3cacc668cb30b4560e27e0c92a3a32e8c34d AS runtime
 
 # Remove package manager, shells, and unnecessary files to approximate distroless
 RUN apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
@@ -21,7 +23,8 @@ RUN apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false
        /usr/bin/perl* /usr/share/perl* \
        /usr/share/doc /usr/share/man /usr/share/info \
        /tmp/* /root/.cache \
-    && find / -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; true
+    && find / -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; true \
+    && find / -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 
 WORKDIR /app
 

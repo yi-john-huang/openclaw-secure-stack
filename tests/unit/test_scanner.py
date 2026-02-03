@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -91,3 +92,55 @@ class TestSkillScanner:
         scanner = SkillScanner(rules=load_rules_from_config(config), audit_logger=mock_logger)
         scanner.scan(str(skill))
         assert mock_logger.log.called
+
+
+class TestPinVerification:
+    def _make_scanner(self, pin_data: dict | None = None) -> SkillScanner:
+        config = [
+            {"id": "T", "name": "T", "severity": "low", "patterns": ["xxx"], "description": "t"},
+        ]
+        rules = load_rules_from_config(config)
+        return SkillScanner(rules=rules, audit_logger=MagicMock(), pin_data=pin_data or {})
+
+    def test_verify_pin_matching_hash(self, tmp_path: Path):
+        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+        digest = hashlib.sha256(skill.read_bytes()).hexdigest()
+        pins = {"skill.js": {"sha256": digest}}
+        scanner = self._make_scanner(pin_data=pins)
+        result = scanner._verify_pin(skill, "skill.js")
+        assert result.status == "verified"
+
+    def test_verify_pin_mismatch(self, tmp_path: Path):
+        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+        pins = {"skill.js": {"sha256": "wrong"}}
+        scanner = self._make_scanner(pin_data=pins)
+        result = scanner._verify_pin(skill, "skill.js")
+        assert result.status == "mismatch"
+        assert result.expected == "wrong"
+
+    def test_verify_pin_unpinned(self, tmp_path: Path):
+        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+        scanner = self._make_scanner(pin_data={})
+        result = scanner._verify_pin(skill, "skill.js")
+        assert result.status == "unpinned"
+
+    def test_scan_reports_mismatch_as_critical_finding(self, tmp_path: Path):
+        skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+        pins = {"skill.js": {"sha256": "wrong"}}
+        scanner = self._make_scanner(pin_data=pins)
+        report = scanner.scan(str(skill))
+        pin_findings = [f for f in report.findings if f.rule_id == "PIN_MISMATCH"]
+        assert len(pin_findings) == 1
+        assert pin_findings[0].severity.value == "critical"
+
+
+class TestTrustScoreWiring:
+    def test_scan_includes_trust_score(self, tmp_path: Path):
+        skill = _create_skill(tmp_path, "test.js", b"var x = 1;")
+        config = [
+            {"id": "T", "name": "T", "severity": "low", "patterns": ["xxx"], "description": "t"},
+        ]
+        scanner = SkillScanner(rules=load_rules_from_config(config), audit_logger=MagicMock())
+        report = scanner.scan(str(skill))
+        assert report.trust_score is not None
+        assert 0 <= report.trust_score.overall <= 100

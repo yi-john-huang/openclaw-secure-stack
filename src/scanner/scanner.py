@@ -15,11 +15,13 @@ from src.audit.logger import AuditLogger
 from src.models import (
     AuditEvent,
     AuditEventType,
+    PinResult,
     RiskLevel,
     ScanFinding,
     ScanReport,
     Severity,
 )
+from src.scanner.trust_score import compute_trust_score
 
 JS_LANGUAGE = Language(tsjs.language())
 
@@ -161,9 +163,26 @@ def _find_js_files(skill_path: str) -> list[Path]:
 class SkillScanner:
     """Orchestrates scanning of skills against all configured rules."""
 
-    def __init__(self, rules: list[ScanRule], audit_logger: AuditLogger | None = None) -> None:
+    def __init__(
+        self,
+        rules: list[ScanRule],
+        audit_logger: AuditLogger | None = None,
+        pin_data: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         self.rules = rules
         self.audit_logger = audit_logger
+        self._pins: dict[str, dict[str, str]] = pin_data or {}
+
+    def _verify_pin(self, skill_path: Path, skill_name: str) -> PinResult:
+        """Compare SHA-256 of skill file against pinned hash."""
+        actual = hashlib.sha256(skill_path.read_bytes()).hexdigest()
+        pin_entry = self._pins.get(skill_name, {})
+        expected = pin_entry.get("sha256")
+        if expected is None:
+            return PinResult(status="unpinned")
+        if actual != expected:
+            return PinResult(status="mismatch", expected=expected, actual=actual)
+        return PinResult(status="verified")
 
     def scan(self, skill_path: str) -> ScanReport:
         start = time.monotonic()
@@ -171,6 +190,32 @@ class SkillScanner:
         skill_name = path.name
         checksum = _compute_checksum(skill_path)
         all_findings: list[ScanFinding] = []
+
+        # Pin verification: mismatch → critical finding, skip AST scan
+        if path.is_file() and self._pins:
+            pin_result = self._verify_pin(path, skill_name)
+            if pin_result.status == "mismatch":
+                all_findings.append(
+                    ScanFinding(
+                        rule_id="PIN_MISMATCH",
+                        rule_name="Skill pin hash mismatch",
+                        severity=Severity.CRITICAL,
+                        file=str(path),
+                        line=0,
+                        column=0,
+                        snippet="",
+                        message=f"Expected hash {pin_result.expected}, got {pin_result.actual}",
+                    )
+                )
+                duration_ms = int((time.monotonic() - start) * 1000)
+                return ScanReport(
+                    skill_name=skill_name,
+                    skill_path=str(path),
+                    checksum=checksum,
+                    findings=all_findings,
+                    scanned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    duration_ms=duration_ms,
+                )
 
         js_files = _find_js_files(skill_path)
         for js_file in js_files:
@@ -197,11 +242,13 @@ class SkillScanner:
                 all_findings.extend(findings)
 
         duration_ms = int((time.monotonic() - start) * 1000)
+        trust_score = compute_trust_score()
         report = ScanReport(
             skill_name=skill_name,
             skill_path=str(path),
             checksum=checksum,
             findings=all_findings,
+            trust_score=trust_score,
             scanned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             duration_ms=duration_ms,
         )

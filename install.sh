@@ -118,6 +118,32 @@ sed_escape_rhs() {
     printf '%s' "$1" | sed 's/[&|/\]/\\&/g'
 }
 
+fail() { error "$*"; exit 1; }
+
+validate_image_hardening() {
+    local image="$1"
+    info "Validating image hardening for $image..."
+
+    # Check: runs as non-root
+    local user
+    user=$($CONTAINER_RT inspect --format '{{.Config.User}}' "$image" 2>/dev/null)
+    [ "$user" = "65534" ] || fail "Image $image runs as root (user=$user)"
+
+    # Check: no SUID/SGID binaries
+    if $CONTAINER_RT run --rm --entrypoint="" "$image" \
+        find / -perm /6000 -type f 2>/dev/null | grep -q .; then
+        fail "SUID/SGID binaries found in $image"
+    fi
+
+    # Check: no shell (warn only)
+    if $CONTAINER_RT run --rm --entrypoint="" "$image" \
+        ls /bin/sh 2>/dev/null; then
+        warn "Shell (/bin/sh) present in image $image"
+    fi
+
+    info "Image hardening checks passed for $image"
+}
+
 main() {
     info "OpenClaw Secure Stack Installer"
     echo ""
@@ -202,6 +228,13 @@ main() {
     # Build containers
     info "Building containers..."
     $COMPOSE_CMD build
+
+    # Validate image hardening
+    local proxy_image
+    proxy_image=$($COMPOSE_CMD images proxy -q 2>/dev/null || echo "")
+    if [ -n "$proxy_image" ]; then
+        validate_image_hardening "$proxy_image"
+    fi
 
     # Read token from .env
     local gateway_token
