@@ -81,15 +81,15 @@ def container_hardening(runtime: str, compose_cmd: list[str]) -> list[Finding]:
         if not container_id:
             continue
 
-        # Check user
+        # Check user (65534=nobody, 65532=distroless nonroot)
         result = _run([runtime, "inspect", "--format", "{{.Config.User}}", container_id])
         user = result.stdout.strip()
-        if user not in ("65534", "nobody"):
+        if user not in ("65534", "65532", "nobody", "nonroot"):
             findings.append(Finding(
                 check="container_hardening",
                 severity="high",
                 message=f"Service '{service}' runs as user '{user}' (expected non-root)",
-                remediation=f"Set 'user: \"65534\"' in docker-compose.yml for {service}",
+                remediation=f"Set 'user: \"65534\"' or use distroless image for {service}",
             ))
 
     return findings

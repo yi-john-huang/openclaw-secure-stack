@@ -1,5 +1,6 @@
 # Pin by digest for reproducible builds. Update periodically.
-FROM coredns/coredns:1.11.1@sha256:fdae4bea41058a21e1dcbebf29f5c1c25b0b5ed3a1f9b5c01e2b135f8a3e3bcf
+# To find latest: podman pull coredns/coredns:1.11.1 && podman inspect --format='{{index .RepoDigests 0}}' coredns/coredns:1.11.1
+FROM coredns/coredns:1.11.1@sha256:1eeb4c7316bacb1d4c8ead65571cd92dd21e27359f0d4917f1a5822a73b75db1
 
 COPY Corefile /etc/coredns/Corefile
 

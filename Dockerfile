@@ -1,7 +1,7 @@
 # Stage 1: Build dependencies with uv
 # Pin base image by digest for reproducible builds. Update digest periodically.
-# To find latest: docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
-FROM python:3.12-slim@sha256:5dc6f84b5e97bfb0c90abfb7c55f3cacc668cb30b4560e27e0c92a3a32e8c34d AS builder
+# To find latest: podman pull python:3.12-slim && podman inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+FROM python:3.12-slim@sha256:4b70b3e968be0f795f45cc2c8c159cb8034d256917573b0e8eacbc23596cd71a AS builder
 
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.0
 COPY --from=${UV_IMAGE} /uv /usr/local/bin/uv
@@ -14,35 +14,25 @@ COPY src/ src/
 COPY config/ config/
 RUN uv sync --frozen --no-dev
 
-# Stage 2: Hardened minimal runtime
-FROM python:3.12-slim@sha256:5dc6f84b5e97bfb0c90abfb7c55f3cacc668cb30b4560e27e0c92a3a32e8c34d AS runtime
-
-# Remove package manager, shells, and unnecessary files to approximate distroless
-RUN apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
-    && rm -rf /var/lib/apt/lists/* /var/cache/* /var/log/* \
-       /usr/bin/apt* /usr/bin/dpkg* /usr/lib/apt /usr/lib/dpkg \
-       /usr/bin/perl* /usr/share/perl* \
-       /usr/share/doc /usr/share/man /usr/share/info \
-       /tmp/* /root/.cache \
-    && find / -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; true \
-    && find / -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true \
-    && rm -f /bin/sh /bin/bash
+# Stage 2: Distroless runtime - no shell, no package manager, minimal attack surface
+# To find latest: podman pull gcr.io/distroless/python3-debian12:nonroot && podman inspect --format='{{index .RepoDigests 0}}' gcr.io/distroless/python3-debian12:nonroot
+FROM gcr.io/distroless/python3-debian12:nonroot@sha256:17b27c84c985a53d0cd2adef4f196ca327fa9b6755369be605cf45533b4e700b AS runtime
 
 WORKDIR /app
 
-# Copy only the venv and app code from builder
-COPY --from=builder /app/.venv /app/.venv
+# Copy the venv and app code from builder
+# Distroless has Python at /usr/bin/python3, we copy our venv's site-packages
+COPY --from=builder /app/.venv/lib/python3.12/site-packages /app/site-packages
 COPY --from=builder /app/src /app/src
 COPY --from=builder /app/config /app/config
 
-# Run as non-root
-USER 65534
+# nonroot image already runs as non-root user (65532)
 
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH=/app/src \
+ENV PYTHONPATH=/app/src:/app/site-packages \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
-ENTRYPOINT ["python", "-m", "uvicorn", "src.proxy.app:create_app_from_env", "--host", "0.0.0.0", "--port", "8080", "--factory"]
+# Use exec form - distroless has no shell
+ENTRYPOINT ["python3", "-m", "uvicorn", "src.proxy.app:create_app_from_env", "--host", "0.0.0.0", "--port", "8080", "--factory"]
