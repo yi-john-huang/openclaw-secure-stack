@@ -11,10 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"
 from audit import (  # noqa: E402
     Finding,
     documentation,
+    log_integrity,
     network_isolation,
     secret_management,
     skill_security,
 )
+from src.audit.logger import AuditLogger
+from src.models import AuditEvent, AuditEventType, RiskLevel
 
 
 def test_finding_dataclass():
@@ -84,3 +87,43 @@ def test_documentation_all_present(tmp_path: Path):
     readme.write_text("# Project\n## Troubleshooting\n## Network Policy\n## Rebuild strategy\n")
     findings = documentation(tmp_path)
     assert len(findings) == 0
+
+
+def _make_event() -> AuditEvent:
+    return AuditEvent(
+        event_type=AuditEventType.AUTH_SUCCESS,
+        action="login",
+        result="success",
+        risk_level=RiskLevel.LOW,
+    )
+
+
+def test_log_integrity_detects_broken_chain(monkeypatch, tmp_path: Path):
+    log_file = tmp_path / "audit.jsonl"
+    logger = AuditLogger(log_path=str(log_file))
+    logger.log(_make_event())
+    logger.log(_make_event())
+    lines = log_file.read_text().strip().split("\n")
+    # Tamper line 0 so line 1's prev_hash won't match
+    lines[0] = lines[0].replace("login", "tampered")
+    log_file.write_text("\n".join(lines) + "\n")
+
+    monkeypatch.setenv("AUDIT_LOG_PATH", str(log_file))
+    monkeypatch.setenv("AUDIT_LOG_MAX_BYTES", "100")
+    monkeypatch.setenv("AUDIT_LOG_BACKUP_COUNT", "1")
+
+    findings = log_integrity(tmp_path)
+    assert any(f.severity == "critical" for f in findings)
+
+
+def test_log_integrity_ok(monkeypatch, tmp_path: Path):
+    log_file = tmp_path / "audit.jsonl"
+    logger = AuditLogger(log_path=str(log_file))
+    logger.log(_make_event())
+
+    monkeypatch.setenv("AUDIT_LOG_PATH", str(log_file))
+    monkeypatch.setenv("AUDIT_LOG_MAX_BYTES", "100")
+    monkeypatch.setenv("AUDIT_LOG_BACKUP_COUNT", "1")
+
+    findings = log_integrity(tmp_path)
+    assert not any(f.severity == "critical" for f in findings)

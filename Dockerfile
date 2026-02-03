@@ -3,7 +3,8 @@
 # To find latest: docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
 FROM python:3.12-slim@sha256:5dc6f84b5e97bfb0c90abfb7c55f3cacc668cb30b4560e27e0c92a3a32e8c34d AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.0
+COPY --from=${UV_IMAGE} /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
@@ -24,7 +25,8 @@ RUN apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false
        /usr/share/doc /usr/share/man /usr/share/info \
        /tmp/* /root/.cache \
     && find / -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; true \
-    && find / -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
+    && find / -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true \
+    && rm -f /bin/sh /bin/bash
 
 WORKDIR /app
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 
@@ -14,6 +15,7 @@ from src.audit.logger import AuditLogger
 from src.models import AuditEvent, AuditEventType, RiskLevel
 from src.proxy.auth_middleware import AuthMiddleware
 from src.quarantine.manager import QuarantineBlockedError, QuarantineManager
+from src.scanner.scanner import SkillScanner, load_pins_from_file, load_rules_from_file
 from src.sanitizer.sanitizer import PromptInjectionError, PromptSanitizer
 
 
@@ -32,8 +34,43 @@ def create_app_from_env() -> FastAPI:
     response_scanner: PromptSanitizer | None = None
     if os.path.exists(indirect_rules):
         response_scanner = PromptSanitizer(indirect_rules)
-    audit_logger = AuditLogger(audit_log) if audit_log else None
-    return create_app(upstream_url, token, sanitizer, audit_logger, response_scanner)
+    audit_logger = AuditLogger.from_env(audit_log) if audit_log else None
+    quarantine_manager = _build_quarantine_manager(audit_logger)
+    return create_app(
+        upstream_url,
+        token,
+        sanitizer,
+        audit_logger,
+        response_scanner,
+        quarantine_manager,
+    )
+
+
+def _build_quarantine_manager(audit_logger: AuditLogger | None) -> QuarantineManager:
+    rules_path = os.environ.get("RULES_PATH", "config/scanner-rules.json")
+    pins_path = os.environ.get("SKILL_PINS_PATH", "config/skill-pins.json")
+    db_path = os.environ.get("QUARANTINE_DB_PATH", "data/quarantine.db")
+    quarantine_dir = os.environ.get("QUARANTINE_DIR", "data/quarantine")
+
+    try:
+        rules = load_rules_from_file(rules_path)
+    except Exception as exc:  # fall back to empty rules for runtime enforcement
+        logging.warning("Failed to load scanner rules from %s: %s", rules_path, exc)
+        rules = []
+
+    pin_data, pins_loaded = load_pins_from_file(pins_path)
+    scanner = SkillScanner(
+        rules=rules,
+        audit_logger=audit_logger,
+        pin_data=pin_data,
+        pins_loaded=pins_loaded,
+    )
+    return QuarantineManager(
+        db_path=db_path,
+        quarantine_dir=quarantine_dir,
+        scanner=scanner,
+        audit_logger=audit_logger,
+    )
 
 
 def create_app(

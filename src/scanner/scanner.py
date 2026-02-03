@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -22,6 +23,8 @@ from src.models import (
     Severity,
 )
 from src.scanner.trust_score import compute_trust_score
+
+logger = logging.getLogger(__name__)
 
 JS_LANGUAGE = Language(tsjs.language())
 
@@ -148,6 +151,23 @@ def _compute_checksum(skill_path: str) -> str:
     return hasher.hexdigest()
 
 
+def load_pins_from_file(pins_path: str) -> tuple[dict[str, dict[str, str]], bool]:
+    """Load skill pin data from JSON file. Returns (pins, file_present)."""
+    path = Path(pins_path)
+    if not path.exists():
+        logger.warning("Skill pin file not found at %s — proceeding without pin checks", pins_path)
+        return {}, False
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        logger.warning("Skill pin file at %s is invalid JSON — proceeding without pin checks", pins_path)
+        return {}, True
+    if not isinstance(data, dict):
+        logger.warning("Skill pin file at %s must be a JSON object — proceeding without pin checks", pins_path)
+        return {}, True
+    return data, True
+
+
 def _find_js_files(skill_path: str) -> list[Path]:
     """Find all JS/TS files in a skill path."""
     path = Path(skill_path)
@@ -168,17 +188,24 @@ class SkillScanner:
         rules: list[ScanRule],
         audit_logger: AuditLogger | None = None,
         pin_data: dict[str, dict[str, str]] | None = None,
+        pins_loaded: bool = False,
     ) -> None:
         self.rules = rules
         self.audit_logger = audit_logger
         self._pins: dict[str, dict[str, str]] = pin_data or {}
+        self._pins_loaded = pins_loaded
 
-    def _verify_pin(self, skill_path: Path, skill_name: str) -> PinResult:
-        """Compare SHA-256 of skill file against pinned hash."""
-        actual = hashlib.sha256(skill_path.read_bytes()).hexdigest()
+    def _verify_pin(self, skill_path: Path, skill_name: str, checksum: str | None = None) -> PinResult:
+        """Compare SHA-256 of skill file/dir against pinned hash."""
+        actual = checksum or _compute_checksum(str(skill_path))
         pin_entry = self._pins.get(skill_name, {})
         expected = pin_entry.get("sha256")
         if expected is None:
+            if self._pins_loaded:
+                logger.warning(
+                    "Skill '%s' has no pin entry in skill-pins.json — proceeding with scan",
+                    skill_name,
+                )
             return PinResult(status="unpinned")
         if actual != expected:
             return PinResult(status="mismatch", expected=expected, actual=actual)
@@ -192,9 +219,10 @@ class SkillScanner:
         all_findings: list[ScanFinding] = []
 
         # Pin verification: mismatch → critical finding, skip AST scan
-        if path.is_file() and self._pins:
-            pin_result = self._verify_pin(path, skill_name)
+        if self._pins_loaded or self._pins:
+            pin_result = self._verify_pin(path, skill_name, checksum=checksum)
             if pin_result.status == "mismatch":
+                trust_score = compute_trust_score()
                 all_findings.append(
                     ScanFinding(
                         rule_id="PIN_MISMATCH",
@@ -213,6 +241,7 @@ class SkillScanner:
                     skill_path=str(path),
                     checksum=checksum,
                     findings=all_findings,
+                    trust_score=trust_score,
                     scanned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     duration_ms=duration_ms,
                 )

@@ -100,28 +100,35 @@ class TestPinVerification:
             {"id": "T", "name": "T", "severity": "low", "patterns": ["xxx"], "description": "t"},
         ]
         rules = load_rules_from_config(config)
-        return SkillScanner(rules=rules, audit_logger=MagicMock(), pin_data=pin_data or {})
+        return SkillScanner(
+            rules=rules,
+            audit_logger=MagicMock(),
+            pin_data=pin_data or {},
+            pins_loaded=pin_data is not None,
+        )
 
     def test_verify_pin_matching_hash(self, tmp_path: Path):
         skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
         digest = hashlib.sha256(skill.read_bytes()).hexdigest()
         pins = {"skill.js": {"sha256": digest}}
         scanner = self._make_scanner(pin_data=pins)
-        result = scanner._verify_pin(skill, "skill.js")
+        result = scanner._verify_pin(skill, "skill.js", checksum=digest)
         assert result.status == "verified"
 
     def test_verify_pin_mismatch(self, tmp_path: Path):
         skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+        digest = hashlib.sha256(skill.read_bytes()).hexdigest()
         pins = {"skill.js": {"sha256": "wrong"}}
         scanner = self._make_scanner(pin_data=pins)
-        result = scanner._verify_pin(skill, "skill.js")
+        result = scanner._verify_pin(skill, "skill.js", checksum=digest)
         assert result.status == "mismatch"
         assert result.expected == "wrong"
 
     def test_verify_pin_unpinned(self, tmp_path: Path):
         skill = _create_skill(tmp_path, "skill.js", b"console.log('hi')")
+        digest = hashlib.sha256(skill.read_bytes()).hexdigest()
         scanner = self._make_scanner(pin_data={})
-        result = scanner._verify_pin(skill, "skill.js")
+        result = scanner._verify_pin(skill, "skill.js", checksum=digest)
         assert result.status == "unpinned"
 
     def test_scan_reports_mismatch_as_critical_finding(self, tmp_path: Path):

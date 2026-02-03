@@ -135,10 +135,10 @@ validate_image_hardening() {
         fail "SUID/SGID binaries found in $image"
     fi
 
-    # Check: no shell (warn only)
+    # Check: no shell
     if $CONTAINER_RT run --rm --entrypoint="" "$image" \
         ls /bin/sh 2>/dev/null; then
-        warn "Shell (/bin/sh) present in image $image"
+        fail "Shell (/bin/sh) present in image $image"
     fi
 
     info "Image hardening checks passed for $image"
