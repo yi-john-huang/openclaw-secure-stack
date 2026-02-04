@@ -1,0 +1,323 @@
+"""Governance middleware orchestrator.
+
+This module provides the GovernanceMiddleware class that orchestrates:
+- Intent classification
+- Plan generation
+- Policy validation
+- Approval gate
+- Session management
+- Execution enforcement
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+from src.governance.approver import ApprovalGate
+from src.governance.classifier import IntentClassifier
+from src.governance.enforcer import EnforcementResult, GovernanceEnforcer
+from src.governance.models import (
+    ApprovalRequest,
+    GovernanceDecision,
+    PolicyViolation,
+    ToolCall,
+)
+from src.governance.planner import PlanGenerator
+from src.governance.session import SessionManager
+from src.governance.store import PlanStore
+from src.governance.validator import PolicyValidator
+
+
+@dataclass
+class EvaluationResult:
+    """Result of governance evaluation."""
+
+    decision: GovernanceDecision
+    plan_id: str | None = None
+    token: str | None = None
+    session_id: str | None = None
+    violations: list[PolicyViolation] = field(default_factory=list)
+    approval_id: str | None = None
+    message: str | None = None
+
+
+class GovernanceMiddleware:
+    """Orchestrates all governance components.
+
+    Provides a unified interface for:
+    - Evaluating requests against policies
+    - Generating execution plans
+    - Managing approvals
+    - Enforcing actions at runtime
+    """
+
+    def __init__(
+        self,
+        db_path: str,
+        secret: str,
+        policy_path: str,
+        patterns_path: str,
+        settings: dict[str, Any],
+    ) -> None:
+        """Initialize the governance middleware.
+
+        Args:
+            db_path: Path to the SQLite database file.
+            secret: Secret key for token signing.
+            policy_path: Path to the policy configuration file.
+            patterns_path: Path to the intent patterns configuration file.
+            settings: Middleware settings dictionary.
+        """
+        self._settings = settings
+        self._enabled = settings.get("enabled", True)
+
+        if self._enabled:
+            self._classifier = IntentClassifier(patterns_path)
+            self._planner = PlanGenerator(patterns_path)
+            self._validator = PolicyValidator(policy_path)
+            self._store = PlanStore(db_path, secret)
+            self._enforcer = GovernanceEnforcer(db_path, secret)
+
+            approval_settings = settings.get("approval", {})
+            self._approver = ApprovalGate(
+                db_path,
+                allow_self_approval=approval_settings.get("allow_self_approval", True),
+            )
+            self._approval_timeout = approval_settings.get("timeout_seconds", 3600)
+
+            session_settings = settings.get("session", {})
+            self._session_enabled = session_settings.get("enabled", True)
+            if self._session_enabled:
+                self._session_mgr = SessionManager(
+                    db_path, ttl_seconds=session_settings.get("ttl_seconds", 3600)
+                )
+
+            enforcement_settings = settings.get("enforcement", {})
+            self._enforcement_enabled = enforcement_settings.get("enabled", True)
+            self._token_ttl = enforcement_settings.get("token_ttl_seconds", 900)
+
+    def evaluate(
+        self,
+        request_body: dict[str, Any],
+        session_id: str | None,
+        user_id: str,
+    ) -> EvaluationResult:
+        """Evaluate a request against governance policies.
+
+        Args:
+            request_body: The request body containing tools.
+            session_id: Optional existing session ID.
+            user_id: The requesting user's ID.
+
+        Returns:
+            EvaluationResult with decision and plan details.
+        """
+        # If disabled, allow everything
+        if not self._enabled:
+            return EvaluationResult(
+                decision=GovernanceDecision.ALLOW,
+                session_id=session_id,
+            )
+
+        # Get or create session
+        if self._session_enabled:
+            session = self._session_mgr.get_or_create(session_id)
+            effective_session_id = session.session_id
+        else:
+            effective_session_id = session_id or str(uuid.uuid4())
+
+        # Classify intent
+        intent = self._classifier.classify(request_body)
+
+        # Generate plan
+        plan = self._planner.generate(
+            intent=intent,
+            request_body=request_body,
+            session_id=effective_session_id,
+        )
+
+        # Get session for rate limiting
+        session_for_validation = None
+        if self._session_enabled:
+            session_for_validation = self._session_mgr.get_or_create(effective_session_id)
+
+        # Validate against policies
+        validation = self._validator.validate(plan, session_for_validation)
+
+        # Handle validation result
+        if validation.decision == GovernanceDecision.BLOCK:
+            return EvaluationResult(
+                decision=GovernanceDecision.BLOCK,
+                session_id=effective_session_id,
+                violations=validation.violations,
+                message="Request blocked by policy",
+            )
+
+        if validation.decision == GovernanceDecision.REQUIRE_APPROVAL:
+            # Create approval request
+            approval = self._approver.create_request(
+                plan_id=plan.plan_id,
+                violations=validation.violations,
+                requester_id=user_id,
+                original_request=request_body,
+                timeout_seconds=self._approval_timeout,
+            )
+            return EvaluationResult(
+                decision=GovernanceDecision.REQUIRE_APPROVAL,
+                plan_id=plan.plan_id,
+                session_id=effective_session_id,
+                violations=validation.violations,
+                approval_id=approval.approval_id,
+                message="Approval required",
+            )
+
+        # Store plan and issue token
+        plan_id, token = self._store.store(plan, ttl_seconds=self._token_ttl)
+
+        # Record in session if enabled
+        if self._session_enabled:
+            for action in plan.actions:
+                self._session_mgr.record_action(
+                    session_id=effective_session_id,
+                    action={"tool": action.tool_call.name, "sequence": action.sequence},
+                    decision=GovernanceDecision.ALLOW,
+                    risk_score=action.risk_score,
+                )
+
+        return EvaluationResult(
+            decision=GovernanceDecision.ALLOW,
+            plan_id=plan_id,
+            token=token,
+            session_id=effective_session_id,
+            violations=[],
+            message="Request allowed",
+        )
+
+    def enforce(
+        self,
+        plan_id: str,
+        token: str | None,
+        tool_call: ToolCall,
+    ) -> EnforcementResult:
+        """Enforce governance policy for a tool call.
+
+        Args:
+            plan_id: The plan ID.
+            token: The plan token.
+            tool_call: The tool call to enforce.
+
+        Returns:
+            EnforcementResult indicating if the action is allowed.
+        """
+        if not self._enabled or not self._enforcement_enabled:
+            return EnforcementResult(
+                allowed=True,
+                reason="Enforcement disabled",
+                plan_id=plan_id,
+            )
+
+        return self._enforcer.enforce_action(plan_id, token, tool_call)
+
+    def mark_action_complete(self, plan_id: str, sequence: int) -> None:
+        """Mark an action as complete.
+
+        Args:
+            plan_id: The plan ID.
+            sequence: The sequence number.
+        """
+        if self._enabled and self._enforcement_enabled:
+            self._enforcer.mark_action_complete(plan_id, sequence)
+
+    def get_approval(self, approval_id: str) -> ApprovalRequest | None:
+        """Get an approval request by ID.
+
+        Args:
+            approval_id: The approval request ID.
+
+        Returns:
+            The ApprovalRequest if found, None otherwise.
+        """
+        if not self._enabled:
+            return None
+        return self._approver.get(approval_id)
+
+    def approve(
+        self,
+        approval_id: str,
+        approver_id: str,
+        acknowledgment: str,
+    ) -> ApprovalRequest:
+        """Approve a pending request.
+
+        Args:
+            approval_id: The approval request ID.
+            approver_id: ID of the user approving.
+            acknowledgment: Acknowledgment text.
+
+        Returns:
+            The updated ApprovalRequest.
+        """
+        return self._approver.approve(approval_id, approver_id, acknowledgment)
+
+    def reject(
+        self,
+        approval_id: str,
+        rejector_id: str,
+        reason: str,
+    ) -> ApprovalRequest:
+        """Reject a pending request.
+
+        Args:
+            approval_id: The approval request ID.
+            rejector_id: ID of the user rejecting.
+            reason: Reason for rejection.
+
+        Returns:
+            The updated ApprovalRequest.
+        """
+        return self._approver.reject(approval_id, rejector_id, reason)
+
+    def cleanup(self) -> dict[str, int]:
+        """Clean up expired resources.
+
+        Returns:
+            Dictionary with counts of cleaned up resources.
+        """
+        if not self._enabled:
+            return {}
+
+        results = {}
+        results["plans"] = self._store.cleanup_expired()
+        if self._session_enabled:
+            results["sessions"] = self._session_mgr.cleanup_expired()
+        return results
+
+    def close(self) -> None:
+        """Close all database connections."""
+        if not self._enabled:
+            return
+
+        # Close all components that have database connections
+        if hasattr(self, "_store") and hasattr(self._store, "_db"):
+            self._store._db.close()
+        if hasattr(self, "_enforcer") and hasattr(self._enforcer, "_store"):
+            self._enforcer._store._db.close()
+        if hasattr(self, "_approver") and hasattr(self._approver, "_db"):
+            self._approver._db.close()
+        if hasattr(self, "_session_mgr") and hasattr(self._session_mgr, "_db"):
+            self._session_mgr._db.close()
+
+    def __enter__(self) -> GovernanceMiddleware:
+        """Context manager entry."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type | None,
+        exc_val: Exception | None,
+        exc_tb: object,
+    ) -> None:
+        """Context manager exit - close all connections."""
+        self.close()

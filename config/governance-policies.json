@@ -1,0 +1,86 @@
+[
+  {
+    "id": "GOV-001",
+    "name": "Block file deletion",
+    "type": "action",
+    "effect": "deny",
+    "conditions": {
+      "category": "file_delete"
+    },
+    "priority": 100
+  },
+  {
+    "id": "GOV-002",
+    "name": "Require approval for code execution",
+    "type": "action",
+    "effect": "require_approval",
+    "conditions": {
+      "category": "code_execution"
+    },
+    "priority": 90
+  },
+  {
+    "id": "GOV-003",
+    "name": "Block sensitive paths",
+    "type": "resource",
+    "effect": "deny",
+    "conditions": {
+      "type": "file",
+      "path_pattern": "^/etc/|.*passwd.*|.*shadow.*|.*secret.*"
+    },
+    "priority": 100
+  },
+  {
+    "id": "GOV-004",
+    "name": "Require approval for external URLs",
+    "type": "resource",
+    "effect": "require_approval",
+    "conditions": {
+      "type": "url",
+      "path_pattern": "^https?://(?!localhost|127\\.0\\.0\\.1)"
+    },
+    "priority": 80
+  },
+  {
+    "id": "GOV-005",
+    "name": "Rate limit per session",
+    "type": "rate",
+    "effect": "deny",
+    "conditions": {
+      "max_actions_per_session": 100
+    },
+    "priority": 50
+  },
+  {
+    "id": "GOV-006",
+    "name": "Flag read-then-exfiltrate sequence",
+    "type": "sequence",
+    "effect": "require_approval",
+    "conditions": {
+      "pattern": ["file_read", "network_request"],
+      "window": 3
+    },
+    "priority": 85
+  },
+  {
+    "id": "GOV-007",
+    "name": "Require approval for system commands",
+    "type": "action",
+    "effect": "require_approval",
+    "conditions": {
+      "category": "system_command"
+    },
+    "priority": 90
+  },
+  {
+    "id": "GOV-008",
+    "name": "Allow localhost URLs",
+    "type": "resource",
+    "effect": "allow",
+    "conditions": {
+      "type": "url",
+      "path_pattern": "^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\])"
+    },
+    "priority": 90
+  }
+]
