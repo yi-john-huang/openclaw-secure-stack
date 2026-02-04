@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-02-04
+
+### Changed
+- **Refactored scanner rules** — extracted `ASTScanRule` base class to eliminate ~90 lines of duplicate code across `dangerous_api.py`, `fs_abuse.py`, and `network_exfil.py`
+- **Consolidated test fixtures** — added factory functions (`make_audit_event()`, `make_scan_finding()`, `make_scan_report()`) to `conftest.py` for DRY test code
+
+### Fixed
+- **LSP compliance** — base class `_walk()` signature now includes `source_str` parameter, allowing proper polymorphism across all scanner rules
+
 ## [1.0.0] - 2026-02-03
 
 ### Added

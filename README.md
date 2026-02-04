@@ -1,6 +1,6 @@
 # OpenClaw Secure Stack
 
-**Version 1.0.0** | [Changelog](CHANGELOG.md)
+**Version 1.0.1** | [Changelog](CHANGELOG.md)
 
 A hardened deployment wrapper that makes OpenClaw safe to self-host. Wraps an unmodified OpenClaw instance with authentication, skill scanning, prompt injection mitigation, network isolation, and full audit logging — without changing a single line of OpenClaw code.
 
