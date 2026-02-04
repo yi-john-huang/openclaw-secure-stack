@@ -27,6 +27,7 @@ class DangerousAPIRule(ASTScanRule):
         findings: list[ScanFinding],
         lines: list[str],
         file_path: str,
+        source_str: str,  # noqa: ARG002
     ) -> None:
         # Check call expressions: eval(...), exec(...)
         if node.type == "call_expression" and node.child_by_field_name("function"):
@@ -67,4 +68,4 @@ class DangerousAPIRule(ASTScanRule):
                             findings.append(self._make_finding(arg, lines, file_path,
                                                                f"Dangerous require: {val}"))
 
-        self._walk_children(node, findings, lines, file_path)
+        self._walk_children(node, findings, lines, file_path, source_str)

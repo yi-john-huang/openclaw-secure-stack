@@ -44,6 +44,9 @@ def config_dir() -> Path:
 
 # --- Factory functions for test data ---
 
+# SHA-256 produces 64 hex characters
+MOCK_CHECKSUM = "a" * 64
+
 
 def make_audit_event(**kwargs) -> AuditEvent:
     """Factory for AuditEvent with sensible defaults."""
@@ -83,7 +86,7 @@ def make_scan_report(
     defaults: dict[str, object] = {
         "skill_name": skill_name,
         "skill_path": skill_path or f"/skills/{skill_name}",
-        "checksum": "a" * 64,
+        "checksum": MOCK_CHECKSUM,
         "findings": findings or [],
         "scanned_at": "2026-01-01T00:00:00Z",
         "duration_ms": 10,
