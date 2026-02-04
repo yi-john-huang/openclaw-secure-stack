@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from tree_sitter import Tree
-
 from src.models import ScanFinding, Severity
 from src.scanner.rules.base import ASTScanRule
 
@@ -31,25 +29,7 @@ class NetworkExfilRule(ASTScanRule):
     def __init__(self, allowlist: set[str] | None = None) -> None:
         self.allowlist = allowlist or DEFAULT_ALLOWLIST
 
-    def detect(self, tree: Tree, source: bytes, file_path: str) -> list[ScanFinding]:
-        """Override detect to pass source_str for URL extraction."""
-        findings: list[ScanFinding] = []
-        source_str = source.decode("utf-8", errors="replace")
-        lines = source_str.split("\n")
-        self._walk_with_source(tree.root_node, findings, lines, file_path, source_str)
-        return findings
-
     def _walk(
-        self,
-        node: Node,
-        findings: list[ScanFinding],
-        lines: list[str],
-        file_path: str,
-    ) -> None:
-        """Not used - this rule uses _walk_with_source instead."""
-        pass
-
-    def _walk_with_source(
         self,
         node: Node,
         findings: list[ScanFinding],
@@ -94,8 +74,7 @@ class NetworkExfilRule(ASTScanRule):
                                 f"Network module import: {val}",
                             ))
 
-        for child in node.children:
-            self._walk_with_source(child, findings, lines, file_path, source_str)
+        self._walk_children(node, findings, lines, file_path, source_str)
 
     def _is_allowlisted_call(self, call_node: Node, source_str: str) -> bool:
         """Check if a network call targets an allowlisted domain."""

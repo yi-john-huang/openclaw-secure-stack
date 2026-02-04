@@ -30,7 +30,7 @@ class ASTScanRule(ScanRule):
         findings: list[ScanFinding] = []
         source_str = source.decode("utf-8", errors="replace")
         lines = source_str.split("\n")
-        self._walk(tree.root_node, findings, lines, file_path)
+        self._walk(tree.root_node, findings, lines, file_path, source_str)
         return findings
 
     @abstractmethod
@@ -40,6 +40,7 @@ class ASTScanRule(ScanRule):
         findings: list[ScanFinding],
         lines: list[str],
         file_path: str,
+        source_str: str,
     ) -> None:
         """Walk AST node and append findings. Subclasses implement detection logic."""
         ...
@@ -50,10 +51,11 @@ class ASTScanRule(ScanRule):
         findings: list[ScanFinding],
         lines: list[str],
         file_path: str,
+        source_str: str,
     ) -> None:
         """Recurse into child nodes."""
         for child in node.children:
-            self._walk(child, findings, lines, file_path)
+            self._walk(child, findings, lines, file_path, source_str)
 
     def _make_finding(
         self,

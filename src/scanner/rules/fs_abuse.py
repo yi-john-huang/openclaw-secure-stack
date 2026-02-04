@@ -31,6 +31,7 @@ class FSAbuseRule(ASTScanRule):
         findings: list[ScanFinding],
         lines: list[str],
         file_path: str,
+        source_str: str,  # noqa: ARG002
     ) -> None:
         # Detect fs.writeFileSync(), fs.unlink(), etc.
         if node.type == "call_expression":
@@ -77,7 +78,7 @@ class FSAbuseRule(ASTScanRule):
                                 f"Filesystem module import: {val}",
                             ))
 
-        self._walk_children(node, findings, lines, file_path)
+        self._walk_children(node, findings, lines, file_path, source_str)
 
     def _writes_to_absolute_path(self, call_node: Node) -> bool:
         """Check if the first argument to a write call is an absolute path string."""
