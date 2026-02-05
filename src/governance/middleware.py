@@ -329,30 +329,15 @@ class GovernanceMiddleware:
 
         # Close all components - continue closing others even if one fails
         errors: list[Exception] = []
+        components = ["_store", "_enforcer", "_approver", "_session_mgr"]
 
-        if hasattr(self, "_store"):
-            try:
-                self._store.close()
-            except Exception as e:
-                errors.append(e)
-
-        if hasattr(self, "_enforcer"):
-            try:
-                self._enforcer.close()
-            except Exception as e:
-                errors.append(e)
-
-        if hasattr(self, "_approver"):
-            try:
-                self._approver.close()
-            except Exception as e:
-                errors.append(e)
-
-        if hasattr(self, "_session_mgr"):
-            try:
-                self._session_mgr.close()
-            except Exception as e:
-                errors.append(e)
+        for component_name in components:
+            component = getattr(self, component_name, None)
+            if component is not None:
+                try:
+                    component.close()
+                except Exception as e:
+                    errors.append(e)
 
         # Re-raise first error if any occurred
         if errors:

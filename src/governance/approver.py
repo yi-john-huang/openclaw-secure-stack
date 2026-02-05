@@ -331,11 +331,8 @@ class ApprovalGate:
 
     def _row_to_request(self, row: dict[str, Any]) -> ApprovalRequest:
         violations_data = json.loads(row["violations_json"])
-        original_data = (
-            json.loads(row["original_request_json"])
-            if row["original_request_json"]
-            else None
-        )
+        original_json = row["original_request_json"]
+        original_data = json.loads(original_json) if original_json else None
 
         return ApprovalRequest(
             approval_id=row["approval_id"],

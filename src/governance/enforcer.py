@@ -121,11 +121,10 @@ class GovernanceEnforcer:
             )
 
         # Get the expected action at the current sequence position
-        expected_action = None
-        for action in plan.actions:
-            if action.sequence == current_seq:
-                expected_action = action
-                break
+        expected_action = next(
+            (a for a in plan.actions if a.sequence == current_seq),
+            None,
+        )
 
         if expected_action is None:
             return EnforcementResult(

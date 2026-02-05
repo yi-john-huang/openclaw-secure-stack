@@ -196,17 +196,16 @@ class PlanStore:
 
         # Verify plan exists and check status
         row = self._db.fetch_one(
-            "SELECT plan_id, decision FROM governance_plans WHERE plan_id = ?",
+            "SELECT decision FROM governance_plans WHERE plan_id = ?",
             (plan_id,),
         )
         if row is None:
             raise PlanNotFoundError(f"Plan not found: {plan_id}")
 
-        current_status = row["decision"]
-        if current_status != "pending_approval":
+        if row["decision"] != "pending_approval":
             raise InvalidPlanStatusError(
                 f"Cannot activate plan {plan_id}: expected status 'pending_approval', "
-                f"got '{current_status}'"
+                f"got '{row['decision']}'"
             )
 
         now = datetime.now(UTC)
