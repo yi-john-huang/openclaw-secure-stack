@@ -12,8 +12,11 @@ This module provides the PolicyValidator class for:
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from src.governance.models import (
     ExecutionPlan,
@@ -87,8 +90,9 @@ class PolicyValidator:
                     self._compiled_patterns[pattern_str] = re.compile(
                         pattern_str, re.IGNORECASE
                     )
-            except (KeyError, ValueError):
+            except (KeyError, ValueError) as e:
                 # Skip invalid policies but log warning
+                logger.warning("Skipping invalid policy in %s: %s", self._policies_path, e)
                 continue
 
         # Sort by priority (highest first)

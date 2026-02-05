@@ -319,19 +319,44 @@ class GovernanceMiddleware:
         return results
 
     def close(self) -> None:
-        """Close all database connections."""
+        """Close all database connections.
+
+        Uses exception-safe cleanup to ensure all components are closed
+        even if one fails.
+        """
         if not self._enabled:
             return
 
-        # Close all components that have database connections
+        # Close all components - continue closing others even if one fails
+        errors: list[Exception] = []
+
         if hasattr(self, "_store"):
-            self._store.close()
+            try:
+                self._store.close()
+            except Exception as e:
+                errors.append(e)
+
         if hasattr(self, "_enforcer"):
-            self._enforcer.close()
+            try:
+                self._enforcer.close()
+            except Exception as e:
+                errors.append(e)
+
         if hasattr(self, "_approver"):
-            self._approver.close()
+            try:
+                self._approver.close()
+            except Exception as e:
+                errors.append(e)
+
         if hasattr(self, "_session_mgr"):
-            self._session_mgr.close()
+            try:
+                self._session_mgr.close()
+            except Exception as e:
+                errors.append(e)
+
+        # Re-raise first error if any occurred
+        if errors:
+            raise errors[0]
 
     def __enter__(self) -> GovernanceMiddleware:
         """Context manager entry."""

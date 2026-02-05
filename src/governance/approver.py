@@ -156,20 +156,27 @@ class ApprovalGate:
         """
         request = self._get_and_validate(approval_id, approver_id)
 
-        # Update status
+        # Atomic update with status check to prevent race conditions
         now = datetime.now(UTC)
-        self._db.execute(
+        cursor = self._db.execute(
             """UPDATE governance_approvals
                SET status = ?, acknowledgment = ?, approved_at = ?, approved_by = ?
-               WHERE approval_id = ?""",
+               WHERE approval_id = ? AND status = ?""",
             (
                 ApprovalStatus.APPROVED.value,
                 acknowledgment,
                 now.isoformat(),
                 approver_id,
                 approval_id,
+                ApprovalStatus.PENDING.value,
             ),
         )
+
+        # Verify update succeeded (guard against concurrent modification)
+        if cursor.rowcount == 0:
+            raise InvalidApprovalStatusError(
+                f"Failed to approve {approval_id}: status changed concurrently"
+            )
 
         return ApprovalRequest(
             approval_id=request.approval_id,
@@ -206,20 +213,27 @@ class ApprovalGate:
         """
         request = self._get_and_validate(approval_id, rejector_id)
 
-        # Update status
+        # Atomic update with status check to prevent race conditions
         now = datetime.now(UTC)
-        self._db.execute(
+        cursor = self._db.execute(
             """UPDATE governance_approvals
                SET status = ?, reason = ?, approved_at = ?, approved_by = ?
-               WHERE approval_id = ?""",
+               WHERE approval_id = ? AND status = ?""",
             (
                 ApprovalStatus.REJECTED.value,
                 reason,
                 now.isoformat(),
                 rejector_id,
                 approval_id,
+                ApprovalStatus.PENDING.value,
             ),
         )
+
+        # Verify update succeeded (guard against concurrent modification)
+        if cursor.rowcount == 0:
+            raise InvalidApprovalStatusError(
+                f"Failed to reject {approval_id}: status changed concurrently"
+            )
 
         return ApprovalRequest(
             approval_id=request.approval_id,

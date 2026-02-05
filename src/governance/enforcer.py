@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.governance.models import ToolCall
-from src.governance.store import PlanStore, TokenVerificationResult
+from src.governance.store import PlanNotFoundError, PlanStore, TokenVerificationResult
 
 
 @dataclass
@@ -113,7 +113,7 @@ class GovernanceEnforcer:
         # Get current sequence position
         try:
             current_seq = self._store.get_current_sequence(plan_id)
-        except Exception:
+        except PlanNotFoundError:
             return EnforcementResult(
                 allowed=False,
                 reason=f"Plan not found: {plan_id}",
