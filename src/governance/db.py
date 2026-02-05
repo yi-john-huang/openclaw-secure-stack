@@ -131,6 +131,30 @@ class GovernanceDB:
         self._conn.commit()
         return cursor
 
+    def execute_returning(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> dict[str, Any] | None:
+        """Execute a SQL statement with RETURNING clause and fetch the result.
+
+        This method fetches the RETURNING result before committing, which is
+        required for SQLite RETURNING clauses to work correctly.
+
+        Args:
+            sql: SQL statement with RETURNING clause and ? placeholders.
+            params: Tuple of parameter values.
+
+        Returns:
+            Dictionary of returned column names to values, or None if no row returned.
+        """
+        if self._conn is None:
+            raise sqlite3.ProgrammingError("Database connection is closed")
+        cursor = self._conn.execute(sql, params)
+        row = cursor.fetchone()
+        self._conn.commit()
+        if row is None:
+            return None
+        return dict(row)
+
     def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         """Fetch a single row as a dictionary.
 

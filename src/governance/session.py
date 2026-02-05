@@ -85,6 +85,10 @@ class SessionManager:
     ) -> None:
         """Record an action in the session history.
 
+        Uses RETURNING clause to atomically get the new action_count,
+        preventing race conditions where concurrent calls could get
+        duplicate sequence numbers.
+
         Args:
             session_id: The session ID.
             action: Action details to record.
@@ -93,26 +97,26 @@ class SessionManager:
         """
         now = datetime.now(UTC)
 
-        # Update session stats
-        self._db.execute(
+        # Update session stats and atomically get new action_count
+        row = self._db.execute_returning(
             """UPDATE governance_sessions
                SET action_count = action_count + 1,
                    risk_accumulator = risk_accumulator + ?,
                    last_activity = ?
-               WHERE session_id = ?""",
+               WHERE session_id = ?
+               RETURNING action_count""",
             (risk_score, now.isoformat(), session_id),
         )
+        new_sequence = row["action_count"] if row else 0
 
-        # Record action in history
+        # Record action in history using the atomically-retrieved sequence
         self._db.execute(
             """INSERT INTO governance_action_history
                (session_id, sequence, action_json, decision, timestamp)
-               VALUES (?,
-                   (SELECT action_count FROM governance_sessions WHERE session_id = ?),
-                   ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?)""",
             (
                 session_id,
-                session_id,
+                new_sequence,
                 json.dumps(action),
                 decision.value,
                 now.isoformat(),

@@ -73,3 +73,75 @@ class TestCleanup:
         time.sleep(1.1)
         count = mgr.cleanup_expired()
         assert count >= 1
+
+
+class TestAtomicSequenceAssignment:
+    """Tests for atomic sequence assignment in record_action."""
+
+    def test_sequential_actions_get_unique_sequences(self, session_mgr):
+        """Each action should get a unique sequence number."""
+        from src.governance.models import GovernanceDecision
+
+        session_mgr.get_or_create("seq-test")
+        for i in range(5):
+            session_mgr.record_action(
+                "seq-test", {"index": i}, GovernanceDecision.ALLOW, 10
+            )
+
+        history = session_mgr.get_history("seq-test")
+        sequences = [h["sequence"] for h in history]
+
+        # All sequences should be unique
+        assert len(sequences) == len(set(sequences))
+        # Sequences should be 1, 2, 3, 4, 5 (action_count after each increment)
+        assert sorted(sequences) == [1, 2, 3, 4, 5]
+
+    def test_concurrent_actions_get_unique_sequences(self, governance_db_path):
+        """Concurrent record_action calls should not produce duplicate sequences."""
+        import threading
+        from src.governance.models import GovernanceDecision
+        from src.governance.session import SessionManager
+
+        session_id = "concurrent-test"
+
+        # Create session first
+        setup_mgr = SessionManager(governance_db_path, ttl_seconds=3600)
+        setup_mgr.get_or_create(session_id)
+        setup_mgr.close()
+
+        results = []
+        errors = []
+
+        def record(db_path, action_name):
+            # Create manager inside the thread to avoid SQLite thread issues
+            try:
+                mgr = SessionManager(db_path, ttl_seconds=3600)
+                mgr.record_action(
+                    session_id, {"name": action_name}, GovernanceDecision.ALLOW, 10
+                )
+                results.append(action_name)
+                mgr.close()
+            except Exception as e:
+                errors.append(e)
+
+        # Launch concurrent threads
+        threads = [
+            threading.Thread(target=record, args=(governance_db_path, f"action-{i}"))
+            for i in range(10)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Check all sequences are unique
+        check_mgr = SessionManager(governance_db_path, ttl_seconds=3600)
+        history = check_mgr.get_history(session_id, limit=100)
+        sequences = [h["sequence"] for h in history]
+
+        assert len(sequences) == 10, f"Expected 10 actions, got {len(sequences)}"
+        assert len(sequences) == len(set(sequences)), (
+            f"Duplicate sequences found: {sequences}"
+        )
