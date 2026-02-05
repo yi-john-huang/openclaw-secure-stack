@@ -7,6 +7,8 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
+from tests.conftest import MOCK_CHECKSUM
+
 
 class TestIntentCategory:
     """Tests for IntentCategory enum."""
@@ -230,7 +232,7 @@ class TestExecutionPlan:
         plan = ExecutionPlan(
             plan_id=str(uuid.uuid4()),
             session_id="session-123",
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[],
             risk_assessment=RiskAssessment(
                 overall_score=20, level=RiskLevel.LOW, factors=[], mitigations=[]
@@ -245,7 +247,7 @@ class TestExecutionPlan:
         plan = ExecutionPlan(
             plan_id=plan_id,
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[],
             risk_assessment=RiskAssessment(
                 overall_score=0, level=RiskLevel.INFO, factors=[], mitigations=[]
@@ -261,7 +263,7 @@ class TestExecutionPlan:
         ExecutionPlan(
             plan_id=str(uuid.uuid4()),
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[],
             risk_assessment=RiskAssessment(
                 overall_score=0, level=RiskLevel.INFO, factors=[], mitigations=[]

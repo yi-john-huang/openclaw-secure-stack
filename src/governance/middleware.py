@@ -43,6 +43,15 @@ class EvaluationResult:
     message: str | None = None
 
 
+@dataclass
+class ApprovalResult:
+    """Result of an approval action."""
+
+    approval: ApprovalRequest
+    plan_id: str | None = None
+    token: str | None = None
+
+
 class GovernanceMiddleware:
     """Orchestrates all governance components.
 
@@ -156,6 +165,9 @@ class GovernanceMiddleware:
             )
 
         if validation.decision == GovernanceDecision.REQUIRE_APPROVAL:
+            # Store plan in pending state (no token issued yet)
+            self._store.store_pending(plan, ttl_seconds=self._approval_timeout)
+
             # Create approval request
             approval = self._approver.create_request(
                 plan_id=plan.plan_id,
@@ -248,8 +260,8 @@ class GovernanceMiddleware:
         approval_id: str,
         approver_id: str,
         acknowledgment: str,
-    ) -> ApprovalRequest:
-        """Approve a pending request.
+    ) -> ApprovalResult:
+        """Approve a pending request and activate the plan.
 
         Args:
             approval_id: The approval request ID.
@@ -257,9 +269,21 @@ class GovernanceMiddleware:
             acknowledgment: Acknowledgment text.
 
         Returns:
-            The updated ApprovalRequest.
+            ApprovalResult with the approval, plan_id, and token.
         """
-        return self._approver.approve(approval_id, approver_id, acknowledgment)
+        approval = self._approver.approve(approval_id, approver_id, acknowledgment)
+
+        # Activate the plan and issue token
+        plan_id, token = self._store.activate_plan(
+            approval.plan_id,
+            ttl_seconds=self._token_ttl,
+        )
+
+        return ApprovalResult(
+            approval=approval,
+            plan_id=plan_id,
+            token=token,
+        )
 
     def reject(
         self,
@@ -300,14 +324,14 @@ class GovernanceMiddleware:
             return
 
         # Close all components that have database connections
-        if hasattr(self, "_store") and hasattr(self._store, "_db"):
-            self._store._db.close()
-        if hasattr(self, "_enforcer") and hasattr(self._enforcer, "_store"):
-            self._enforcer._store._db.close()
-        if hasattr(self, "_approver") and hasattr(self._approver, "_db"):
-            self._approver._db.close()
-        if hasattr(self, "_session_mgr") and hasattr(self._session_mgr, "_db"):
-            self._session_mgr._db.close()
+        if hasattr(self, "_store"):
+            self._store.close()
+        if hasattr(self, "_enforcer"):
+            self._enforcer.close()
+        if hasattr(self, "_approver"):
+            self._approver.close()
+        if hasattr(self, "_session_mgr"):
+            self._session_mgr.close()
 
     def __enter__(self) -> GovernanceMiddleware:
         """Context manager entry."""

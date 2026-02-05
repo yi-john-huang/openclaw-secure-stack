@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -10,11 +9,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    return str(tmp_path / "test_governance.db")
 
 
 @pytest.fixture
@@ -82,11 +76,11 @@ def settings() -> dict[str, Any]:
 
 
 @pytest.fixture
-def middleware(db_path: str, secret: str, policy_path: str, patterns_path: str, settings: dict):
+def middleware(governance_db_path: str, secret: str, policy_path: str, patterns_path: str, settings: dict):
     from src.governance.middleware import GovernanceMiddleware
 
     mw = GovernanceMiddleware(
-        db_path=db_path,
+        db_path=governance_db_path,
         secret=secret,
         policy_path=policy_path,
         patterns_path=patterns_path,
@@ -98,12 +92,12 @@ def middleware(db_path: str, secret: str, policy_path: str, patterns_path: str, 
 
 class TestMiddlewareInit:
     def test_creates_with_settings(
-        self, db_path, secret, policy_path, patterns_path, settings
+        self, governance_db_path, secret, policy_path, patterns_path, settings
     ):
         from src.governance.middleware import GovernanceMiddleware
 
         mw = GovernanceMiddleware(
-            db_path=db_path,
+            db_path=governance_db_path,
             secret=secret,
             policy_path=policy_path,
             patterns_path=patterns_path,
@@ -112,14 +106,14 @@ class TestMiddlewareInit:
         assert mw is not None
 
     def test_disabled_middleware_allows_all(
-        self, db_path, secret, policy_path, patterns_path
+        self, governance_db_path, secret, policy_path, patterns_path
     ):
         from src.governance.middleware import GovernanceMiddleware
         from src.governance.models import GovernanceDecision
 
         settings = {"enabled": False}
         mw = GovernanceMiddleware(
-            db_path=db_path,
+            db_path=governance_db_path,
             secret=secret,
             policy_path=policy_path,
             patterns_path=patterns_path,

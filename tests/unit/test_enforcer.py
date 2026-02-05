@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 import pytest
 
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    return str(tmp_path / "test_governance.db")
+from tests.conftest import MOCK_CHECKSUM
 
 
 @pytest.fixture
@@ -19,20 +15,19 @@ def secret() -> str:
 
 
 @pytest.fixture
-def plan_store(db_path: str, secret: str):
+def plan_store(governance_db_path: str, secret: str):
     from src.governance.store import PlanStore
-    return PlanStore(db_path, secret)
+    return PlanStore(governance_db_path, secret)
 
 
 @pytest.fixture
-def enforcer(db_path: str, secret: str):
+def enforcer(governance_db_path: str, secret: str):
     from src.governance.enforcer import GovernanceEnforcer
-    return GovernanceEnforcer(db_path, secret)
+    return GovernanceEnforcer(governance_db_path, secret)
 
 
 @pytest.fixture
 def sample_plan():
-    import hashlib
     from src.governance.models import (
         ExecutionPlan,
         IntentCategory,
@@ -45,7 +40,7 @@ def sample_plan():
     return ExecutionPlan(
         plan_id=str(uuid.uuid4()),
         session_id="sess-1",
-        request_hash=hashlib.sha256(b"test").hexdigest(),
+        request_hash=MOCK_CHECKSUM,
         actions=[
             PlannedAction(
                 sequence=0,
@@ -88,16 +83,16 @@ class TestTokenVerification:
         result = enforcer.verify_plan_token("wrong-plan-id", token)
         assert result.valid is False
 
-    def test_verify_expired_token(self, db_path, secret, sample_plan):
+    def test_verify_expired_token(self, governance_db_path, secret, sample_plan):
         import time
         from src.governance.store import PlanStore
         from src.governance.enforcer import GovernanceEnforcer
 
-        store = PlanStore(db_path, secret)
+        store = PlanStore(governance_db_path, secret)
         plan_id, token = store.store(sample_plan, ttl_seconds=1)
         time.sleep(1.1)
 
-        enforcer = GovernanceEnforcer(db_path, secret)
+        enforcer = GovernanceEnforcer(governance_db_path, secret)
         result = enforcer.verify_plan_token(plan_id, token)
         assert result.expired is True
 
@@ -133,11 +128,11 @@ class TestActionEnforcement:
         from src.governance.models import ToolCall
         plan_id, token = plan_store.store(sample_plan)
 
-        # Tool not in plan
+        # Tool not in plan - the enforcer now matches by sequence position
         tool_call = ToolCall(name="delete_file", arguments={"path": "/etc/passwd"}, id="call-x")
         result = enforcer.enforce_action(plan_id, token, tool_call)
         assert result.allowed is False
-        assert "unplanned" in result.reason.lower() or "not in plan" in result.reason.lower()
+        assert "mismatch" in result.reason.lower() or "expected" in result.reason.lower()
 
     def test_enforce_rejects_out_of_sequence(self, enforcer, plan_store, sample_plan):
         from src.governance.models import ToolCall

@@ -104,7 +104,7 @@ class PlanStore:
                 plan.request_hash,
                 actions_json,
                 risk_json,
-                "pending",
+                "active",
                 now.isoformat(),
                 expires_at.isoformat(),
                 0,
@@ -116,6 +116,101 @@ class PlanStore:
         token = self._issue_token(plan.plan_id, now, expires_at)
 
         return plan.plan_id, token
+
+    def store_pending(
+        self,
+        plan: ExecutionPlan,
+        ttl_seconds: int | None = None,
+    ) -> str:
+        """Store an execution plan in pending_approval state without issuing a token.
+
+        Used when a plan requires approval before execution.
+
+        Args:
+            plan: The execution plan to store.
+            ttl_seconds: TTL in seconds for the pending plan (default: 900).
+
+        Returns:
+            The plan_id.
+        """
+        if ttl_seconds is None:
+            ttl_seconds = self.DEFAULT_TTL_SECONDS
+
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+
+        # Serialize actions and risk assessment
+        actions_json = json.dumps([self._action_to_dict(a) for a in plan.actions])
+        risk_json = json.dumps(self._risk_to_dict(plan.risk_assessment))
+
+        # Store in database with pending_approval status
+        self._db.execute(
+            """INSERT INTO governance_plans
+               (plan_id, session_id, request_hash, actions_json, risk_json,
+                decision, created_at, expires_at, current_sequence, retry_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                plan.plan_id,
+                plan.session_id,
+                plan.request_hash,
+                actions_json,
+                risk_json,
+                "pending_approval",
+                now.isoformat(),
+                expires_at.isoformat(),
+                0,
+                0,
+            ),
+        )
+
+        return plan.plan_id
+
+    def activate_plan(
+        self,
+        plan_id: str,
+        ttl_seconds: int | None = None,
+    ) -> tuple[str, str]:
+        """Activate a pending plan and issue a token.
+
+        Called after approval to make the plan executable.
+
+        Args:
+            plan_id: The plan ID to activate.
+            ttl_seconds: Token TTL in seconds (default: 900).
+
+        Returns:
+            Tuple of (plan_id, token).
+
+        Raises:
+            PlanNotFoundError: If the plan doesn't exist.
+        """
+        if ttl_seconds is None:
+            ttl_seconds = self.DEFAULT_TTL_SECONDS
+
+        # Verify plan exists
+        plan = self.lookup(plan_id)
+        if plan is None:
+            raise PlanNotFoundError(f"Plan not found: {plan_id}")
+
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+
+        # Update status to active and refresh expiration
+        self._db.execute(
+            """UPDATE governance_plans
+               SET decision = ?, expires_at = ?
+               WHERE plan_id = ?""",
+            ("active", expires_at.isoformat(), plan_id),
+        )
+
+        # Issue token
+        token = self._issue_token(plan_id, now, expires_at)
+
+        return plan_id, token
+
+    def close(self) -> None:
+        """Close the database connection."""
+        self._db.close()
 
     def lookup(self, plan_id: str) -> ExecutionPlan | None:
         """Look up a plan by ID.

@@ -3,33 +3,29 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
 import pytest
 
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    """Create a temporary database path."""
-    return str(tmp_path / "test_governance.db")
+from tests.conftest import MOCK_CHECKSUM
 
 
 @pytest.fixture
-def db(db_path: str):
+def db(governance_db_path: str):
     """Create a GovernanceDB instance."""
     from src.governance.db import GovernanceDB
 
-    return GovernanceDB(db_path)
+    return GovernanceDB(governance_db_path)
 
 
 class TestGovernanceDBInit:
     """Tests for database initialization."""
 
-    def test_init_creates_database_file(self, db_path: str):
+    def test_init_creates_database_file(self, governance_db_path: str):
+        from pathlib import Path
         from src.governance.db import GovernanceDB
 
-        GovernanceDB(db_path)
-        assert Path(db_path).exists()
+        GovernanceDB(governance_db_path)
+        assert Path(governance_db_path).exists()
 
     def test_init_creates_schema(self, db):
         """Verify all tables exist."""
@@ -126,7 +122,7 @@ class TestGovernancePlansTable:
             (
                 "plan-123",
                 "sess-1",
-                "a" * 64,
+                MOCK_CHECKSUM,
                 "[]",
                 "{}",
                 "allow",
@@ -152,7 +148,7 @@ class TestGovernancePlansTable:
             (
                 "plan-123",
                 None,
-                "a" * 64,
+                MOCK_CHECKSUM,
                 "[]",
                 "{}",
                 "allow",
@@ -305,11 +301,11 @@ class TestDatabaseConnection:
         with pytest.raises(sqlite3.ProgrammingError):
             db.fetch_all("SELECT 1")
 
-    def test_context_manager(self, db_path: str):
+    def test_context_manager(self, governance_db_path: str):
         """Test using database as context manager."""
         from src.governance.db import GovernanceDB
 
-        with GovernanceDB(db_path) as db:
+        with GovernanceDB(governance_db_path) as db:
             db.execute(
                 """INSERT INTO governance_sessions
                    (session_id, created_at, last_activity, action_count, risk_accumulator)
@@ -318,7 +314,7 @@ class TestDatabaseConnection:
             )
         # Connection should be closed after context exits
         # Verify data was committed by opening a new connection
-        with GovernanceDB(db_path) as db2:
+        with GovernanceDB(governance_db_path) as db2:
             result = db2.fetch_one(
                 "SELECT * FROM governance_sessions WHERE session_id = ?", ("sess-1",)
             )

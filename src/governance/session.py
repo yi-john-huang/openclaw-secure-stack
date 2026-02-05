@@ -183,6 +183,10 @@ class SessionManager:
 
         return cursor.rowcount
 
+    def close(self) -> None:
+        """Close the database connection."""
+        self._db.close()
+
     def _row_to_session(self, row: dict[str, Any]) -> Session:
         return Session(
             session_id=row["session_id"],

@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    return str(tmp_path / "test_governance.db")
-
-
-@pytest.fixture
-def session_mgr(db_path: str):
+def session_mgr(governance_db_path: str):
     from src.governance.session import SessionManager
-    return SessionManager(db_path, ttl_seconds=3600)
+    return SessionManager(governance_db_path, ttl_seconds=3600)
 
 
 class TestSessionCRUD:
@@ -72,9 +66,9 @@ class TestHistory:
 
 
 class TestCleanup:
-    def test_cleanup_expired(self, db_path):
+    def test_cleanup_expired(self, governance_db_path):
         from src.governance.session import SessionManager
-        mgr = SessionManager(db_path, ttl_seconds=1)
+        mgr = SessionManager(governance_db_path, ttl_seconds=1)
         mgr.get_or_create("old-sess")
         time.sleep(1.1)
         count = mgr.cleanup_expired()

@@ -120,28 +120,30 @@ class GovernanceEnforcer:
                 plan_id=plan_id,
             )
 
-        # Find matching action in plan
-        matching_action = None
+        # Get the expected action at the current sequence position
+        expected_action = None
         for action in plan.actions:
-            if self._tool_calls_match(action.tool_call, tool_call):
-                matching_action = action
+            if action.sequence == current_seq:
+                expected_action = action
                 break
 
-        if matching_action is None:
+        if expected_action is None:
             return EnforcementResult(
                 allowed=False,
-                reason=f"Unplanned action: {tool_call.name} not in plan",
+                reason=f"No action at sequence {current_seq}: plan may be complete",
                 plan_id=plan_id,
                 sequence=current_seq,
             )
 
-        # Check sequence ordering
-        if matching_action.sequence != current_seq:
+        # Validate tool call matches the expected action at current sequence
+        if not self._tool_calls_match(expected_action.tool_call, tool_call):
             return EnforcementResult(
                 allowed=False,
                 reason=(
-                    f"Sequence violation: expected sequence {current_seq}, "
-                    f"got {matching_action.sequence}"
+                    f"Action mismatch at sequence {current_seq}: "
+                    f"expected {expected_action.tool_call.name} with args "
+                    f"{expected_action.tool_call.arguments}, "
+                    f"got {tool_call.name} with args {tool_call.arguments}"
                 ),
                 plan_id=plan_id,
                 sequence=current_seq,
@@ -151,7 +153,7 @@ class GovernanceEnforcer:
             allowed=True,
             reason="Action allowed",
             plan_id=plan_id,
-            sequence=matching_action.sequence,
+            sequence=current_seq,
         )
 
     def mark_action_complete(self, plan_id: str, sequence: int) -> None:
@@ -165,11 +167,15 @@ class GovernanceEnforcer:
         if sequence == current:
             self._store.advance_sequence(plan_id)
 
+    def close(self) -> None:
+        """Close the database connection."""
+        self._store.close()
+
     def _tool_calls_match(self, planned: ToolCall, actual: ToolCall) -> bool:
         """Check if two tool calls match.
 
-        Matches on tool name. ID matching is optional since the actual
-        call may have a different ID than planned.
+        Matches on tool name and arguments. ID matching is optional since
+        the actual call may have a different ID than planned.
 
         Args:
             planned: The planned tool call.
@@ -178,4 +184,7 @@ class GovernanceEnforcer:
         Returns:
             True if the tool calls match.
         """
-        return planned.name == actual.name
+        if planned.name != actual.name:
+            return False
+        # Match arguments to prevent drift (e.g., read_file on different path)
+        return planned.arguments == actual.arguments

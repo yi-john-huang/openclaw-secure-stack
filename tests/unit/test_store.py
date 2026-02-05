@@ -6,23 +6,18 @@ import base64
 import json
 import time
 import uuid
-from pathlib import Path
 
 import pytest
 
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    """Create a temporary database path."""
-    return str(tmp_path / "test_governance.db")
+from tests.conftest import MOCK_CHECKSUM
 
 
 @pytest.fixture
-def store(db_path: str):
+def store(governance_db_path: str):
     """Create a PlanStore instance."""
     from src.governance.store import PlanStore
 
-    return PlanStore(db_path, secret="test-secret-key-32-bytes-long!!")
+    return PlanStore(governance_db_path, secret="test-secret-key-32-bytes-long!!")
 
 
 @pytest.fixture
@@ -40,7 +35,7 @@ def sample_plan():
     return ExecutionPlan(
         plan_id=str(uuid.uuid4()),
         session_id="sess-123",
-        request_hash="a" * 64,
+        request_hash=MOCK_CHECKSUM,
         actions=[
             PlannedAction(
                 sequence=0,

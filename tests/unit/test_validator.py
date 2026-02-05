@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import MOCK_CHECKSUM
+
 
 @pytest.fixture
 def policies_path(tmp_path: Path) -> str:
@@ -270,7 +272,7 @@ class TestSequencePolicies:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -309,7 +311,7 @@ class TestSequencePolicies:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -370,7 +372,7 @@ class TestSequencePolicies:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -451,7 +453,7 @@ class TestFullValidation:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -483,7 +485,7 @@ class TestFullValidation:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -515,7 +517,7 @@ class TestFullValidation:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -547,7 +549,7 @@ class TestFullValidation:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,
@@ -578,7 +580,7 @@ class TestFullValidation:
         plan = ExecutionPlan(
             plan_id="plan-1",
             session_id=None,
-            request_hash="a" * 64,
+            request_hash=MOCK_CHECKSUM,
             actions=[
                 PlannedAction(
                     sequence=0,

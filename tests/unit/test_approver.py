@@ -4,26 +4,20 @@ from __future__ import annotations
 
 import time
 import uuid
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
-def db_path(tmp_path: Path) -> str:
-    return str(tmp_path / "test_governance.db")
+def approver(governance_db_path: str):
+    from src.governance.approver import ApprovalGate
+    return ApprovalGate(governance_db_path, allow_self_approval=True)
 
 
 @pytest.fixture
-def approver(db_path: str):
+def approver_no_self(governance_db_path: str):
     from src.governance.approver import ApprovalGate
-    return ApprovalGate(db_path, allow_self_approval=True)
-
-
-@pytest.fixture
-def approver_no_self(db_path: str):
-    from src.governance.approver import ApprovalGate
-    return ApprovalGate(db_path, allow_self_approval=False)
+    return ApprovalGate(governance_db_path, allow_self_approval=False)
 
 
 @pytest.fixture

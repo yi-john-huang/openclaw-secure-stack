@@ -295,6 +295,10 @@ class ApprovalGate:
             message=d["message"],
         )
 
+    def close(self) -> None:
+        """Close the database connection."""
+        self._db.close()
+
     def _row_to_request(self, row: dict[str, Any]) -> ApprovalRequest:
         violations_data = json.loads(row["violations_json"])
         original_data = (
