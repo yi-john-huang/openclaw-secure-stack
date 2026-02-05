@@ -156,16 +156,21 @@ class GovernanceEnforcer:
             sequence=current_seq,
         )
 
-    def mark_action_complete(self, plan_id: str, sequence: int) -> None:
+    def mark_action_complete(self, plan_id: str, sequence: int) -> bool:
         """Mark an action as complete and advance the sequence.
+
+        Uses atomic compare-and-swap to prevent race conditions when
+        multiple threads attempt to complete the same action.
 
         Args:
             plan_id: The plan ID.
             sequence: The completed sequence number.
+
+        Returns:
+            True if the sequence was advanced, False if already advanced
+            or sequence didn't match (concurrent completion).
         """
-        current = self._store.get_current_sequence(plan_id)
-        if sequence == current:
-            self._store.advance_sequence(plan_id)
+        return self._store.advance_sequence_atomic(plan_id, sequence)
 
     def close(self) -> None:
         """Close the database connection."""

@@ -41,6 +41,12 @@ class ApprovalNotFoundError(Exception):
     pass
 
 
+class InvalidApprovalStatusError(Exception):
+    """Raised when approval request is not in expected status."""
+
+    pass
+
+
 class ApprovalGate:
     """Manages human-in-the-loop approval flow.
 
@@ -146,6 +152,7 @@ class ApprovalGate:
             ApprovalNotFoundError: If approval not found.
             ApprovalExpiredError: If approval has expired.
             ApproverMismatchError: If approver doesn't match requester (when required).
+            InvalidApprovalStatusError: If approval is not in PENDING status.
         """
         request = self._get_and_validate(approval_id, approver_id)
 
@@ -195,6 +202,7 @@ class ApprovalGate:
         Raises:
             ApprovalNotFoundError: If approval not found.
             ApprovalExpiredError: If approval has expired.
+            InvalidApprovalStatusError: If approval is not in PENDING status.
         """
         request = self._get_and_validate(approval_id, rejector_id)
 
@@ -261,10 +269,18 @@ class ApprovalGate:
             ApprovalNotFoundError: If approval not found.
             ApprovalExpiredError: If approval has expired.
             ApproverMismatchError: If actor doesn't match requester.
+            InvalidApprovalStatusError: If approval is not in PENDING status.
         """
         request = self.get(approval_id)
         if request is None:
             raise ApprovalNotFoundError(f"Approval not found: {approval_id}")
+
+        # Check status - only PENDING requests can be approved/rejected
+        if request.status != ApprovalStatus.PENDING:
+            raise InvalidApprovalStatusError(
+                f"Cannot act on approval {approval_id}: "
+                f"expected status 'pending', got '{request.status.value}'"
+            )
 
         # Check expiration
         expires_at = datetime.fromisoformat(request.expires_at)

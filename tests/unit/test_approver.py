@@ -132,3 +132,57 @@ class TestLookup:
 
     def test_get_nonexistent_returns_none(self, approver):
         assert approver.get("nonexistent") is None
+
+
+class TestStatusValidation:
+    """Tests for status validation to prevent double approval/rejection."""
+
+    def test_cannot_approve_already_approved(self, approver, sample_violations):
+        """Attempting to approve an already-approved request raises error."""
+        from src.governance.approver import InvalidApprovalStatusError
+
+        request = approver.create_request("plan-1", sample_violations, "user-1")
+        approver.approve(request.approval_id, "user-1", "first approval")
+
+        with pytest.raises(InvalidApprovalStatusError) as exc_info:
+            approver.approve(request.approval_id, "user-2", "second approval")
+
+        assert "pending" in str(exc_info.value).lower()
+        assert "approved" in str(exc_info.value).lower()
+
+    def test_cannot_approve_already_rejected(self, approver, sample_violations):
+        """Attempting to approve an already-rejected request raises error."""
+        from src.governance.approver import InvalidApprovalStatusError
+
+        request = approver.create_request("plan-1", sample_violations, "user-1")
+        approver.reject(request.approval_id, "user-1", "rejected")
+
+        with pytest.raises(InvalidApprovalStatusError) as exc_info:
+            approver.approve(request.approval_id, "user-2", "trying to approve")
+
+        assert "pending" in str(exc_info.value).lower()
+        assert "rejected" in str(exc_info.value).lower()
+
+    def test_cannot_reject_already_approved(self, approver, sample_violations):
+        """Attempting to reject an already-approved request raises error."""
+        from src.governance.approver import InvalidApprovalStatusError
+
+        request = approver.create_request("plan-1", sample_violations, "user-1")
+        approver.approve(request.approval_id, "user-1", "approved")
+
+        with pytest.raises(InvalidApprovalStatusError) as exc_info:
+            approver.reject(request.approval_id, "user-2", "trying to reject")
+
+        assert "pending" in str(exc_info.value).lower()
+
+    def test_cannot_reject_already_rejected(self, approver, sample_violations):
+        """Attempting to reject an already-rejected request raises error."""
+        from src.governance.approver import InvalidApprovalStatusError
+
+        request = approver.create_request("plan-1", sample_violations, "user-1")
+        approver.reject(request.approval_id, "user-1", "first rejection")
+
+        with pytest.raises(InvalidApprovalStatusError) as exc_info:
+            approver.reject(request.approval_id, "user-2", "second rejection")
+
+        assert "pending" in str(exc_info.value).lower()

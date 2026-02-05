@@ -378,3 +378,92 @@ class TestTokenBase64Padding:
         # The token should be valid (signature matches, not expired)
         assert result.valid is True
         assert result.expired is False
+
+
+class TestPlanStatusValidation:
+    """Tests for plan status validation in activate_plan."""
+
+    def test_activate_plan_requires_pending_approval_status(self, store, sample_plan):
+        """Can only activate plans that are in pending_approval status."""
+        from src.governance.store import InvalidPlanStatusError
+
+        # Store plan as active (not pending_approval)
+        plan_id, _ = store.store(sample_plan)
+
+        with pytest.raises(InvalidPlanStatusError) as exc_info:
+            store.activate_plan(plan_id)
+
+        assert "pending_approval" in str(exc_info.value)
+        assert "active" in str(exc_info.value)
+
+    def test_activate_plan_succeeds_for_pending_approval(self, store, sample_plan):
+        """activate_plan succeeds when plan is in pending_approval status."""
+        # Store plan as pending_approval
+        plan_id = store.store_pending(sample_plan)
+
+        # Should succeed
+        returned_id, token = store.activate_plan(plan_id)
+        assert returned_id == plan_id
+        assert token is not None
+        assert "." in token
+
+    def test_cannot_activate_already_active_plan(self, store, sample_plan):
+        """Cannot activate a plan that's already active."""
+        from src.governance.store import InvalidPlanStatusError
+
+        # Store as pending and activate
+        plan_id = store.store_pending(sample_plan)
+        store.activate_plan(plan_id)
+
+        # Second activation should fail
+        with pytest.raises(InvalidPlanStatusError) as exc_info:
+            store.activate_plan(plan_id)
+
+        assert "pending_approval" in str(exc_info.value)
+
+
+class TestAtomicSequenceAdvancement:
+    """Tests for atomic sequence advancement to prevent race conditions."""
+
+    def test_atomic_advance_succeeds_with_matching_sequence(self, store, sample_plan):
+        """advance_sequence_atomic succeeds when sequence matches expected."""
+        plan_id, _ = store.store(sample_plan)
+
+        # Initial sequence is 0
+        assert store.get_current_sequence(plan_id) == 0
+
+        # Advance atomically
+        result = store.advance_sequence_atomic(plan_id, expected_sequence=0)
+        assert result is True
+        assert store.get_current_sequence(plan_id) == 1
+
+    def test_atomic_advance_fails_with_mismatched_sequence(self, store, sample_plan):
+        """advance_sequence_atomic fails when sequence doesn't match expected."""
+        plan_id, _ = store.store(sample_plan)
+
+        # Try to advance with wrong expected sequence
+        result = store.advance_sequence_atomic(plan_id, expected_sequence=5)
+        assert result is False
+
+        # Sequence should be unchanged
+        assert store.get_current_sequence(plan_id) == 0
+
+    def test_atomic_advance_prevents_double_increment(self, store, sample_plan):
+        """Two calls with same expected_sequence - only first succeeds."""
+        plan_id, _ = store.store(sample_plan)
+
+        # Both try to advance from sequence 0
+        result1 = store.advance_sequence_atomic(plan_id, expected_sequence=0)
+        result2 = store.advance_sequence_atomic(plan_id, expected_sequence=0)
+
+        assert result1 is True
+        assert result2 is False
+        # Final sequence should be 1, not 2
+        assert store.get_current_sequence(plan_id) == 1
+
+    def test_atomic_advance_nonexistent_raises(self, store):
+        """advance_sequence_atomic raises PlanNotFoundError for nonexistent plan."""
+        from src.governance.store import PlanNotFoundError
+
+        with pytest.raises(PlanNotFoundError):
+            store.advance_sequence_atomic("nonexistent-plan-id", expected_sequence=0)

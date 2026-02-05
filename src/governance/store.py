@@ -36,6 +36,12 @@ class PlanNotFoundError(Exception):
     pass
 
 
+class InvalidPlanStatusError(Exception):
+    """Raised when a plan is not in the expected status for an operation."""
+
+    pass
+
+
 @dataclass
 class TokenVerificationResult:
     """Result of token verification."""
@@ -183,25 +189,42 @@ class PlanStore:
 
         Raises:
             PlanNotFoundError: If the plan doesn't exist.
+            InvalidPlanStatusError: If the plan is not in pending_approval status.
         """
         if ttl_seconds is None:
             ttl_seconds = self.DEFAULT_TTL_SECONDS
 
-        # Verify plan exists
-        plan = self.lookup(plan_id)
-        if plan is None:
+        # Verify plan exists and check status
+        row = self._db.fetch_one(
+            "SELECT plan_id, decision FROM governance_plans WHERE plan_id = ?",
+            (plan_id,),
+        )
+        if row is None:
             raise PlanNotFoundError(f"Plan not found: {plan_id}")
+
+        current_status = row["decision"]
+        if current_status != "pending_approval":
+            raise InvalidPlanStatusError(
+                f"Cannot activate plan {plan_id}: expected status 'pending_approval', "
+                f"got '{current_status}'"
+            )
 
         now = datetime.now(UTC)
         expires_at = now + timedelta(seconds=ttl_seconds)
 
-        # Update status to active and refresh expiration
-        self._db.execute(
+        # Update status to active and refresh expiration (atomic with status check)
+        cursor = self._db.execute(
             """UPDATE governance_plans
                SET decision = ?, expires_at = ?
-               WHERE plan_id = ?""",
-            ("active", expires_at.isoformat(), plan_id),
+               WHERE plan_id = ? AND decision = ?""",
+            ("active", expires_at.isoformat(), plan_id, "pending_approval"),
         )
+
+        # Verify update succeeded (guard against race condition)
+        if cursor.rowcount == 0:
+            raise InvalidPlanStatusError(
+                f"Failed to activate plan {plan_id}: status changed concurrently"
+            )
 
         # Issue token
         token = self._issue_token(plan_id, now, expires_at)
@@ -320,6 +343,42 @@ class PlanStore:
             (new_seq, plan_id),
         )
         return new_seq
+
+    def advance_sequence_atomic(self, plan_id: str, expected_sequence: int) -> bool:
+        """Atomically advance the sequence pointer if it matches expected value.
+
+        Uses compare-and-swap semantics to prevent race conditions when
+        multiple threads attempt to advance the sequence concurrently.
+
+        Args:
+            plan_id: The plan ID.
+            expected_sequence: The expected current sequence number.
+
+        Returns:
+            True if the sequence was advanced, False if it didn't match.
+
+        Raises:
+            PlanNotFoundError: If the plan doesn't exist.
+        """
+        # Verify plan exists first
+        row = self._db.fetch_one(
+            "SELECT plan_id FROM governance_plans WHERE plan_id = ?",
+            (plan_id,),
+        )
+        if row is None:
+            raise PlanNotFoundError(f"Plan not found: {plan_id}")
+
+        # Atomic compare-and-swap: only update if current_sequence matches expected
+        new_seq = expected_sequence + 1
+        cursor = self._db.execute(
+            """UPDATE governance_plans
+               SET current_sequence = ?
+               WHERE plan_id = ? AND current_sequence = ?""",
+            (new_seq, plan_id, expected_sequence),
+        )
+
+        # rowcount == 1 means the update succeeded (sequence matched)
+        return cursor.rowcount == 1
 
     def get_retry_count(self, plan_id: str) -> int:
         """Get the retry count for a plan.

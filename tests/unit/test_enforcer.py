@@ -155,8 +155,9 @@ class TestSequenceTracking:
         result1 = enforcer.enforce_action(plan_id, token, tool_call_1)
         assert result1.allowed is True
 
-        # Mark as completed
-        enforcer.mark_action_complete(plan_id, 0)
+        # Mark as completed - returns True on success
+        completed = enforcer.mark_action_complete(plan_id, 0)
+        assert completed is True
 
         # Now second action should be allowed
         tool_call_2 = ToolCall(name="write_file", arguments={"path": "/tmp/out.txt"}, id="call-2")
@@ -174,6 +175,30 @@ class TestSequenceTracking:
 
         assert result1.allowed is True
         assert result2.allowed is True
+
+    def test_mark_action_complete_returns_false_on_mismatch(self, enforcer, plan_store, sample_plan):
+        """mark_action_complete returns False when sequence doesn't match."""
+        plan_id, _ = plan_store.store(sample_plan)
+
+        # Try to complete wrong sequence
+        result = enforcer.mark_action_complete(plan_id, 5)
+        assert result is False
+
+        # Sequence should be unchanged
+        assert plan_store.get_current_sequence(plan_id) == 0
+
+    def test_mark_action_complete_prevents_double_completion(self, enforcer, plan_store, sample_plan):
+        """Two calls to complete same action - only first succeeds."""
+        plan_id, _ = plan_store.store(sample_plan)
+
+        # Both try to complete sequence 0
+        result1 = enforcer.mark_action_complete(plan_id, 0)
+        result2 = enforcer.mark_action_complete(plan_id, 0)
+
+        assert result1 is True
+        assert result2 is False
+        # Sequence should be 1, not 2
+        assert plan_store.get_current_sequence(plan_id) == 1
 
 
 class TestPlanNotFound:
