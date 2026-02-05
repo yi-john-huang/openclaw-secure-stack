@@ -25,6 +25,7 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
+uv.lock
 
 # SQLite
 *.db

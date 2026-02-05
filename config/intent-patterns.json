@@ -1,0 +1,85 @@
+{
+  "tool_categories": {
+    "file_read": [
+      "read_file",
+      "get_file_contents",
+      "list_directory",
+      "list_dir",
+      "cat",
+      "head",
+      "tail",
+      "glob",
+      "find_file"
+    ],
+    "file_write": [
+      "write_file",
+      "create_file",
+      "update_file",
+      "append_file",
+      "save_file",
+      "edit_file"
+    ],
+    "file_delete": [
+      "delete_file",
+      "remove_file",
+      "rm",
+      "unlink"
+    ],
+    "network_request": [
+      "http_get",
+      "http_post",
+      "fetch_url",
+      "api_call",
+      "web_request",
+      "curl",
+      "wget"
+    ],
+    "code_execution": [
+      "execute_code",
+      "run_script",
+      "eval",
+      "exec",
+      "python",
+      "node",
+      "bash",
+      "shell"
+    ],
+    "skill_invocation": [
+      "invoke_skill",
+      "call_skill",
+      "run_skill"
+    ],
+    "system_command": [
+      "shell_command",
+      "system",
+      "subprocess",
+      "os_command"
+    ]
+  },
+  "argument_patterns": {
+    "sensitive_paths": [
+      "^/etc/",
+      "^/var/log/",
+      ".*passwd.*",
+      ".*shadow.*",
+      ".*secret.*",
+      ".*credential.*",
+      ".*\\.pem$",
+      ".*\\.key$",
+      ".*\\.env$"
+    ],
+    "external_urls": [
+      "^https?://(?!localhost|127\\.0\\.0\\.1|\\[::1\\])"
+    ]
+  },
+  "risk_multipliers": {
+    "file_read": 1.0,
+    "file_write": 2.0,
+    "file_delete": 3.0,
+    "network_request": 2.0,
+    "code_execution": 4.0,
+    "skill_invocation": 1.5,
+    "system_command": 4.0,
+    "unknown": 2.5
+  }
+}
