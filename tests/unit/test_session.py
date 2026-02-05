@@ -75,6 +75,22 @@ class TestCleanup:
         assert count >= 1
 
 
+class TestRecordActionValidation:
+    """Tests for record_action input validation."""
+
+    def test_record_action_nonexistent_session_raises(self, session_mgr):
+        """Recording action on non-existent session should raise ValueError."""
+        from src.governance.models import GovernanceDecision
+
+        with pytest.raises(ValueError, match="does not exist"):
+            session_mgr.record_action(
+                "nonexistent-session",
+                {"name": "test"},
+                GovernanceDecision.ALLOW,
+                10,
+            )
+
+
 class TestAtomicSequenceAssignment:
     """Tests for atomic sequence assignment in record_action."""
 

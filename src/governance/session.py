@@ -90,10 +90,13 @@ class SessionManager:
         duplicate sequence numbers.
 
         Args:
-            session_id: The session ID.
+            session_id: The session ID. Must exist (call get_or_create first).
             action: Action details to record.
             decision: The governance decision.
             risk_score: Risk score of the action.
+
+        Raises:
+            ValueError: If session_id does not exist in the database.
         """
         now = datetime.now(UTC)
 
@@ -107,7 +110,12 @@ class SessionManager:
                RETURNING action_count""",
             (risk_score, now.isoformat(), session_id),
         )
-        new_sequence = row["action_count"] if row else 0
+        if row is None:
+            raise ValueError(
+                f"Session '{session_id}' does not exist. "
+                "Call get_or_create() before record_action()."
+            )
+        new_sequence = row["action_count"]
 
         # Record action in history using the atomically-retrieved sequence
         self._db.execute(

@@ -319,3 +319,65 @@ class TestDatabaseConnection:
                 "SELECT * FROM governance_sessions WHERE session_id = ?", ("sess-1",)
             )
             assert result is not None
+
+
+class TestExecuteReturning:
+    """Tests for execute_returning method with RETURNING clause."""
+
+    def test_execute_returning_returns_updated_value(self, db):
+        """RETURNING clause should return the updated column value."""
+        db.execute(
+            """INSERT INTO governance_sessions
+               (session_id, created_at, last_activity, action_count, risk_accumulator)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("sess-1", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z", 5, 0),
+        )
+        result = db.execute_returning(
+            """UPDATE governance_sessions
+               SET action_count = action_count + 1
+               WHERE session_id = ?
+               RETURNING action_count""",
+            ("sess-1",),
+        )
+        assert result == {"action_count": 6}
+
+    def test_execute_returning_no_matching_row(self, db):
+        """RETURNING should return None when no rows match UPDATE."""
+        result = db.execute_returning(
+            """UPDATE governance_sessions
+               SET action_count = action_count + 1
+               WHERE session_id = ?
+               RETURNING action_count""",
+            ("nonexistent",),
+        )
+        assert result is None
+
+    def test_execute_returning_multiple_columns(self, db):
+        """RETURNING can return multiple columns."""
+        db.execute(
+            """INSERT INTO governance_sessions
+               (session_id, created_at, last_activity, action_count, risk_accumulator)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("sess-1", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z", 0, 10),
+        )
+        result = db.execute_returning(
+            """UPDATE governance_sessions
+               SET action_count = action_count + 1,
+                   risk_accumulator = risk_accumulator + 5
+               WHERE session_id = ?
+               RETURNING action_count, risk_accumulator""",
+            ("sess-1",),
+        )
+        assert result == {"action_count": 1, "risk_accumulator": 15}
+
+    def test_execute_returning_closed_connection_raises(self, db):
+        """execute_returning should raise when connection is closed."""
+        db.close()
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            db.execute_returning(
+                """UPDATE governance_sessions
+                   SET action_count = 1
+                   WHERE session_id = ?
+                   RETURNING action_count""",
+                ("sess-1",),
+            )
