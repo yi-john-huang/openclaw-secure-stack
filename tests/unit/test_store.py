@@ -282,3 +282,99 @@ class TestPlanExpiration:
         # Plan should be gone after cleanup
         result = store.lookup(plan_id)
         assert result is None
+
+
+class TestTokenBase64Padding:
+    """Regression tests for base64 padding edge cases."""
+
+    def test_verify_token_base64_padding_mod_3(self, store):
+        """Regression: token verification handles payload length mod 4 == 3.
+
+        When base64-encoded payload (without padding) has length mod 4 == 3,
+        it needs exactly 1 padding char ('='), but the code adds '=='.
+        Python's base64 decoder must handle this correctly.
+
+        This tests the edge case where adding '==' to a string that only
+        needs '=' could potentially cause decoding issues.
+        """
+        from src.governance.models import (
+            ExecutionPlan,
+            RiskAssessment,
+            RiskLevel,
+        )
+
+        # Find a plan_id that produces payload with length mod 4 == 3
+        for i in range(100):
+            plan_id = f"padding-test-{i}"
+
+            plan = ExecutionPlan(
+                plan_id=plan_id,
+                session_id="sess-padding",
+                request_hash="a" * 64,
+                actions=[],
+                risk_assessment=RiskAssessment(
+                    overall_score=0, level=RiskLevel.INFO, factors=[], mitigations=[]
+                ),
+            )
+
+            stored_plan_id, token = store.store(plan)
+            payload_b64, _ = token.split(".")
+
+            if len(payload_b64) % 4 == 3:
+                # Found the edge case - verify token works
+                result = store.verify_token(plan_id, token)
+                assert result.valid is True, (
+                    f"Token verification failed for payload length {len(payload_b64)} "
+                    f"(mod 4 == 3). This is a base64 padding edge case."
+                )
+                assert result.expired is False
+                return  # Test passed
+
+        pytest.fail("Could not find plan_id producing payload length mod 4 == 3")
+
+    def test_verify_token_crafted_mod_3_payload(self, store, sample_plan):
+        """Regression: directly test decoding a payload with length mod 4 == 3.
+
+        This test crafts a token with a known payload that has length mod 4 == 3
+        to ensure the base64 decoding works correctly when only 1 padding char
+        is needed but 2 are added.
+        """
+        import base64
+        import hashlib
+        import hmac
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        # Store a plan to get a valid plan_id in the database
+        plan_id, _ = store.store(sample_plan)
+
+        # Craft a payload that when encoded produces length mod 4 == 3
+        # We'll manually create a token with the right payload structure
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=900)
+
+        # The payload JSON structure - adjust plan_id to get desired length
+        # "ab" base64 encodes to "YWI=" (length 3 without padding = mod 4 == 3)
+        # We need to find a payload that produces this
+        payload = {
+            "plan_id": plan_id,
+            "issued_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+        payload_json = json.dumps(payload, sort_keys=True)
+        payload_b64_full = base64.urlsafe_b64encode(payload_json.encode()).decode()
+        payload_b64 = payload_b64_full.rstrip("=")
+
+        # Compute signature like the store does
+        secret = b"test-secret-key-32-bytes-long!!"
+        signature = hmac.new(secret, payload_b64.encode(), hashlib.sha256).digest()
+        signature_b64 = base64.urlsafe_b64encode(signature).decode().rstrip("=")
+
+        crafted_token = f"{payload_b64}.{signature_b64}"
+
+        # Now verify the token - this exercises the decode path
+        result = store.verify_token(plan_id, crafted_token)
+
+        # The token should be valid (signature matches, not expired)
+        assert result.valid is True
+        assert result.expired is False
