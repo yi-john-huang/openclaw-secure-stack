@@ -210,3 +210,37 @@ class TestSanitizationRule:
             description="Detects ignore-previous-instructions pattern",
         )
         assert rule.action == "strip"
+
+
+class TestGovernanceAuditEventTypes:
+    def test_governance_audit_event_types_exist(self):
+        """All governance audit event types are defined."""
+        assert AuditEventType.GOVERNANCE_ALLOW == "governance_allow"
+        assert AuditEventType.GOVERNANCE_BLOCK == "governance_block"
+        assert AuditEventType.GOVERNANCE_APPROVAL_REQUIRED == "governance_approval_required"
+        assert AuditEventType.GOVERNANCE_APPROVAL_GRANTED == "governance_approval_granted"
+        assert AuditEventType.GOVERNANCE_ERROR == "governance_error"
+
+    def test_webhook_audit_event_types_exist(self):
+        """All webhook audit event types are defined."""
+        assert AuditEventType.WEBHOOK_RECEIVED == "webhook_received"
+        assert AuditEventType.WEBHOOK_RELAY == "webhook_relay"
+        assert AuditEventType.WEBHOOK_REPLAY_REJECTED == "webhook_replay_rejected"
+        assert AuditEventType.WEBHOOK_RATE_LIMITED == "webhook_rate_limited"
+        assert AuditEventType.WEBHOOK_SIGNATURE_FAILED == "webhook_signature_failed"
+
+    def test_plugin_audit_event_types_exist(self):
+        """Plugin enforcement audit event types are defined."""
+        assert AuditEventType.PLUGIN_GOVERNANCE_BLOCK == "plugin_governance_block"
+        assert AuditEventType.PLUGIN_QUARANTINE_BLOCK == "plugin_quarantine_block"
+
+    def test_new_event_types_serialize_correctly(self):
+        """New event types serialize correctly in AuditEvent model."""
+        event = AuditEvent(
+            event_type=AuditEventType.GOVERNANCE_BLOCK,
+            action="evaluate",
+            result="blocked",
+            risk_level=RiskLevel.HIGH,
+        )
+        data = event.model_dump()
+        assert data["event_type"] == "governance_block"

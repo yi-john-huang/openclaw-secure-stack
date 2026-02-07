@@ -21,10 +21,17 @@ PUBLIC_PREFIXES = ("/__openclaw__/canvas",)
 class AuthMiddleware:
     """ASGI middleware that validates Bearer tokens using constant-time comparison."""
 
-    def __init__(self, app: ASGIApp, token: str, audit_logger: AuditLogger | None = None) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        token: str,
+        audit_logger: AuditLogger | None = None,
+        webhook_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self.app = app
         self._token = token.encode()
         self.audit_logger = audit_logger
+        self._webhook_paths = webhook_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -34,8 +41,8 @@ class AuthMiddleware:
         request = Request(scope)
         path = request.url.path
 
-        # Skip auth for public paths
-        if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+        # Skip auth for public paths and registered webhook paths
+        if path in PUBLIC_PATHS or path in self._webhook_paths or path.startswith(PUBLIC_PREFIXES):
             await self.app(scope, receive, send)
             return
 

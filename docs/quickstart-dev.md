@@ -21,7 +21,7 @@ The proxy listens on `http://localhost:8000` by default (uvicorn default).
 
 ## Running Tests
 
-The test suite has 117 tests across three categories:
+The test suite has 529 tests across three categories:
 
 ```bash
 # All tests
@@ -118,8 +118,24 @@ Rules are defined in `config/prompt-rules.json` and applied by `src/sanitizer/sa
 src/
 ├── models.py              # Shared Pydantic models (frozen): ScanFinding, AuditEvent, etc.
 ├── proxy/
-│   ├── app.py             # FastAPI app factory (create_app_from_env reads env vars)
-│   └── auth_middleware.py  # ASGI middleware: Bearer token auth (constant-time compare)
+│   ├── app.py             # FastAPI app factory, webhook handlers, governance wiring
+│   ├── auth_middleware.py  # ASGI middleware: Bearer token auth (constant-time compare)
+│   ├── governance_helpers.py  # evaluate_governance(), has_tool_calls(), strip_headers()
+│   └── governance_routes.py   # /governance/* REST endpoints (plans, approvals)
+├── webhook/
+│   ├── models.py          # WebhookMessage, WebhookResponse Pydantic models
+│   └── relay.py           # WebhookRelayPipeline: sanitize → governance → quarantine → forward → scan
+├── governance/
+│   ├── middleware.py       # GovernanceMiddleware (evaluate, approve, enforce)
+│   ├── models.py          # Intent, GovernanceDecision, Plan, Session types
+│   ├── classifier.py      # Intent classifier (tool-call categorization)
+│   ├── planner.py         # Plan generator with risk assessment
+│   ├── validator.py        # Policy validator (action/resource/sequence/rate rules)
+│   ├── approver.py        # Approval gate (human-in-the-loop)
+│   ├── enforcer.py        # Execution enforcer (HMAC token validation)
+│   ├── session.py         # Session manager (multi-turn tracking, rate limits)
+│   ├── db.py              # SQLite persistence (WAL mode)
+│   └── store.py           # Plan/approval storage abstraction
 ├── scanner/
 │   ├── scanner.py         # Core engine: loads rules from JSON, scans files via tree-sitter
 │   ├── cli.py             # Click CLI: scan, quarantine list/override
@@ -137,14 +153,19 @@ src/
     └── logger.py          # Append-only JSON Lines logger (file-locked writes)
 
 config/
-├── scanner-rules.json     # Scanner rule definitions (loaded at startup)
-├── prompt-rules.json      # Prompt injection regex rules (loaded at startup)
-└── egress-allowlist.conf  # Allowed external domains (one per line)
+├── scanner-rules.json         # Scanner rule definitions (loaded at startup)
+├── prompt-rules.json          # Prompt injection regex rules (loaded at startup)
+├── indirect-injection-rules.json  # Tool-result injection rules (plugin hook)
+├── governance-policies.json   # Governance validation policy rules
+├── intent-patterns.json       # Intent classifier patterns
+├── quarantine-list.json       # Seed quarantine list (bind-mounted into containers)
+├── skill-pins.json            # Skill integrity pins for trust verification
+└── egress-allowlist.conf      # Allowed external domains (one per line)
 
 tests/
-├── conftest.py            # Shared fixtures
-├── unit/                  # 13 test files — one per module
-├── integration/           # Proxy auth + scan-quarantine pipeline
+├── conftest.py            # Shared fixtures and factory functions
+├── unit/                  # Module-level tests (~70% of suite)
+├── integration/           # Proxy auth, webhooks, scan-quarantine pipeline
 └── security/              # Adversarial skill tests
 ```
 

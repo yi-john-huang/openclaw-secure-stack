@@ -27,6 +27,21 @@ class AuditEventType(str, Enum):
     PROMPT_INJECTION = "prompt_injection"
     INDIRECT_INJECTION = "indirect_injection"
     EGRESS_BLOCKED = "egress_blocked"
+    # Governance events
+    GOVERNANCE_ALLOW = "governance_allow"
+    GOVERNANCE_BLOCK = "governance_block"
+    GOVERNANCE_APPROVAL_REQUIRED = "governance_approval_required"
+    GOVERNANCE_APPROVAL_GRANTED = "governance_approval_granted"
+    GOVERNANCE_ERROR = "governance_error"
+    # Webhook events
+    WEBHOOK_RECEIVED = "webhook_received"
+    WEBHOOK_RELAY = "webhook_relay"
+    WEBHOOK_REPLAY_REJECTED = "webhook_replay_rejected"
+    WEBHOOK_RATE_LIMITED = "webhook_rate_limited"
+    WEBHOOK_SIGNATURE_FAILED = "webhook_signature_failed"
+    # Plugin enforcement events
+    PLUGIN_GOVERNANCE_BLOCK = "plugin_governance_block"
+    PLUGIN_QUARANTINE_BLOCK = "plugin_quarantine_block"
 
 
 class RiskLevel(str, Enum):

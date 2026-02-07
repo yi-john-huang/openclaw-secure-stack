@@ -12,8 +12,26 @@ services:
       - PROMPT_RULES_PATH=/app/config/prompt-rules.json
       - AUDIT_LOG_PATH=/app/data/audit.jsonl
       - INDIRECT_RULES_PATH=/app/config/indirect-injection-rules.json
+      # Governance environment variables
+      - GOVERNANCE_ENABLED=${GOVERNANCE_ENABLED:-true}
+      - GOVERNANCE_SECRET=${GOVERNANCE_SECRET}
+      - GOVERNANCE_DB_PATH=/app/data/governance.db
+      - GOVERNANCE_POLICY_PATH=/app/config/governance-policies.json
+      - GOVERNANCE_PATTERNS_PATH=/app/config/intent-patterns.json
+      - GOVERNANCE_APPROVAL_TIMEOUT=${GOVERNANCE_APPROVAL_TIMEOUT:-3600}
+      - GOVERNANCE_ALLOW_SELF_APPROVAL=${GOVERNANCE_ALLOW_SELF_APPROVAL:-true}
+      # Webhook environment variables
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET:-}
+      - WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN:-}
+      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID:-}
+      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN:-}
+      - WHATSAPP_REPLAY_WINDOW_SECONDS=${WHATSAPP_REPLAY_WINDOW_SECONDS:-300}
+      - WEBHOOK_RATE_LIMIT=${WEBHOOK_RATE_LIMIT:-60}
+      - REPLAY_DB_PATH=/app/data/replay.db
     volumes:
       - audit-data:/app/data
+      - ./config/quarantine-list.json:/app/config/quarantine-list.json:ro
     networks:
       - internal
     read_only: true
@@ -43,10 +61,13 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - PROMPT_GUARD_ENFORCEMENT=${PROMPT_GUARD_ENFORCEMENT:-true}
+      - QUARANTINE_LIST_PATH=/home/openclaw/config/quarantine-list.json
     volumes:
       - openclaw-data:/home/openclaw/.openclaw
       - ./plugins/prompt-guard:/home/openclaw/plugins/prompt-guard:ro
       - ./config/indirect-injection-rules.json:/home/openclaw/config/indirect-injection-rules.json:ro
+      - ./config/quarantine-list.json:/home/openclaw/config/quarantine-list.json:ro
     networks:
       - internal
       - egress
@@ -79,8 +100,8 @@ services:
     networks:
       - internal
     depends_on:
-      openclaw:
-        condition: service_healthy
+      proxy:
+        condition: service_started
     read_only: true
     cap_drop:
       - ALL

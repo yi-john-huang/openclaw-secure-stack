@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-07
+
+### Added
+- **Webhook relay pipeline** — secure ingress for Telegram and WhatsApp messages
+  - Input sanitization, prompt-injection detection, and response scanning
+  - HMAC signature verification (Telegram bot token, WhatsApp app secret)
+  - Rate limiting (per-sender sliding window) and replay protection (nonce + TTL)
+  - Body-size enforcement before JSON parsing (10 MB limit) to prevent OOM
+  - Audit logging with source attribution (`telegram` / `whatsapp`)
+- **Governance wiring for webhooks** — webhook messages now pass through the governance layer (block/allow/require-approval) between sanitization and upstream forwarding
+- **Quarantine seed file** — `config/quarantine-list.json` with bind-mount wiring in Docker Compose, replacing the unused named volume
+
+### Changed
+- **Auth middleware hardening** — replaced broad `/webhook/` prefix exemption with per-instance `frozenset` of registered webhook paths, preventing auth bypass on arbitrary `/webhook/*` URLs and cross-instance state leakage
+
+### Fixed
+- **Webhook body-size protection** — raw body length is now checked before `json.loads()` in both Telegram and WhatsApp handlers (previously only checked `message.text` inside the relay pipeline)
+- **Plugin quarantine file mount** — Docker Compose now bind-mounts `config/quarantine-list.json` as a file instead of mounting a directory volume, matching what `plugins/prompt-guard/index.ts` expects
+
+### Security
+- Auth bypass on `/webhook/*` catch-all closed (per-instance allowlist instead of module-global mutable set)
+- Governance evaluation enforced on webhook path (was accepted but never called)
+- Pre-parse body-size limits prevent memory exhaustion via oversized webhook payloads
+- Cross-instance auth state isolation via immutable `frozenset` constructor parameter
+
 ## [1.1.0] - 2026-02-06
 
 ### Added

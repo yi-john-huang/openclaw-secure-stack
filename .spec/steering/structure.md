@@ -4,13 +4,18 @@
 ```text
 openclaw-secure-stack/
 |-- src/
-|   |-- proxy/              # FastAPI app and auth middleware
+|   |-- proxy/              # FastAPI app, auth middleware, governance helpers, webhook handlers
+|   |   |-- governance_helpers.py  # evaluate_governance(), has_tool_calls(), strip_headers()
+|   |   `-- governance_routes.py   # /governance/* REST endpoints (plans, approvals)
+|   |-- webhook/            # Telegram/WhatsApp relay pipeline
+|   |   |-- models.py       # WebhookMessage, WebhookResponse
+|   |   `-- relay.py        # WebhookRelayPipeline (sanitize → governance → quarantine → forward → scan)
 |   |-- sanitizer/          # Prompt injection strip/reject logic
 |   |-- scanner/            # AST scanner engine, CLI, trust scoring, rule implementations
 |   |   `-- rules/          # Rule modules by detection category (base.py = abstract base class)
 |   |-- quarantine/         # SQLite persistence + quarantine manager
 |   |-- governance/         # Intent classifier, planner, validator, approver, enforcer, session/store
-|   |   `-- middleware.py   # ASGI middleware integration point for governance in the proxy pipeline
+|   |   `-- middleware.py   # GovernanceMiddleware integration for proxy and webhook pipelines
 |   |-- audit/              # JSONL append-only logger
 |   `-- models.py           # Shared Pydantic models
 |-- tests/
@@ -55,8 +60,8 @@ openclaw-secure-stack/
 | Module-private helpers | leading underscore where useful | `_load_rules` |
 
 ## Module Organization Rules
-- Keep security concerns separated by domain (`auth`, `sanitizer`, `scanner`, `governance`, `audit`).
-- Share cross-module schemas only through `src/models.py` and governance-local models in `src/governance/models.py`.
+- Keep security concerns separated by domain (`auth`, `sanitizer`, `scanner`, `governance`, `webhook`, `audit`).
+- Share cross-module schemas only through `src/models.py`, governance-local models in `src/governance/models.py`, and webhook models in `src/webhook/models.py`.
 - Place scanner detection logic under `src/scanner/rules/`; keep CLI orchestration in `src/scanner/cli.py`.
 - Keep persistence abstractions close to their domain (`quarantine/db.py`, `governance/db.py`, `governance/store.py`).
 
@@ -83,6 +88,7 @@ When adding functionality, add or update tests in the matching suite first; keep
 - `config/intent-patterns.json`: intent classifier patterns
 - `config/egress-allowlist.conf`: DNS allowlist for outbound network access
 - `config/skill-pins.json`: skill integrity pins for trust verification
+- `config/quarantine-list.json`: seed quarantine list (bind-mounted into containers)
 
 Treat `config/` as policy-as-code: prefer data-driven changes there before hardcoding behavior.
 
