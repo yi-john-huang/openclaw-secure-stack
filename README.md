@@ -97,10 +97,14 @@ Telegram/WhatsApp ──► Signature Check ──► Rate Limit ──► Repla
 
 ### Plugin Hook System
 
+**⚠️ Essential Component**: The `prompt-guard` plugin is **automatically installed** by `install.sh` and is **required** for protection against indirect prompt injection attacks.
+
 The TypeScript plugin (`plugins/prompt-guard/index.ts`) runs inside OpenClaw itself as a defense-in-depth layer:
 
-- **`tool_result_persist` hook** — Scans tool results for indirect injection patterns before they enter the agent's context window. Matching patterns are stripped or flagged.
-- **`before_tool_call` hook** — Verifies that governance headers (`x-governance-plan-id`, `x-governance-token`) are present before allowing high-risk tool calls. Falls back to local quarantine list enforcement.
+- **`tool_result_persist` hook** — Scans tool results (web pages, API responses, files) for indirect injection patterns before they enter the agent's context window. Matching patterns are stripped or flagged based on rules in `config/indirect-injection-rules.json`.
+- **`before_tool_call` hook** — Verifies that governance headers (`x-governance-plan-id`, `x-governance-token`) are present before allowing high-risk tool calls (exec, shell, file_write). Falls back to local quarantine list enforcement.
+
+**Why it's essential**: The proxy can only see direct user input. When OpenClaw autonomously calls tools (web search, file read), the plugin is the only layer that can intercept malicious instructions embedded in those results.
 
 ### Offline Scanning Pipeline
 

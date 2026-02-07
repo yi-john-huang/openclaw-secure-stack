@@ -4,16 +4,18 @@ Operations guide for deploying and running OpenClaw Secure Stack.
 
 ## What You Get After Install
 
-Running `./install.sh` starts four containers:
+Running `./install.sh` starts four containers and automatically installs the **prompt-guard plugin**:
 
 | Container | Role | Port |
 |-----------|------|------|
 | **proxy** | Reverse proxy — authenticates requests, sanitizes prompts, evaluates governance, handles webhooks, forwards to OpenClaw | `${PROXY_PORT:-8080}` on the host |
-| **openclaw** | OpenClaw gateway — serves WebSocket + HTTP API, runs the plugin hook | `3000` on the host |
+| **openclaw** | OpenClaw gateway — serves WebSocket + HTTP API, **runs the prompt-guard plugin hook** | `3000` on the host |
 | **caddy** | HTTPS reverse proxy for the Control UI (self-signed cert for localhost) | `${CADDY_PORT:-8443}` on the host |
-| **egress-dns** | CoreDNS sidecar — forwards DNS queries to public resolvers | 172.28.0.10 (internal) |
+| **egress-dns** | CoreDNS sidecar — forwards DNS queries to Cloudflare malware-blocking DNS (1.1.1.2) | 172.28.0.10 (internal) |
 
 All containers run read-only, as non-root, with dropped capabilities.
+
+**🛡️ Prompt-Guard Plugin**: The installer automatically configures the TypeScript plugin inside OpenClaw to scan tool results for indirect prompt injection (e.g., malicious instructions hidden in web pages). This is **essential** for protection when OpenClaw fetches external content.
 
 ## Your API Token
 
