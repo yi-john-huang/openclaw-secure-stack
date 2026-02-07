@@ -1,41 +1,34 @@
 # Product Overview
 
-## Product Description
-**Project**: openclaw-secure-stack
-**Version**: 0.1.0
-**Type**: Security Sidecar / Reverse Proxy
+## Description
+OpenClaw Secure Stack is a hardened deployment wrapper for OpenClaw that adds security controls without modifying upstream OpenClaw code. It provides authenticated API access, prompt-injection mitigation, skill scanning and quarantine, network egress controls, governance checks, and append-only audit logging.
 
-OpenClaw Secure Stack is a hardened deployment wrapper for the OpenClaw AI agent. It wraps an unmodified OpenClaw instance with enterprise-grade security controls — authentication, prompt injection mitigation, skill supply-chain scanning, quarantine management, and network egress filtering — all without modifying a single line of OpenClaw code.
+**Current version:** 1.1.0
 
-## Core Features
-- **Bearer Token Authentication** — constant-time token validation on every request
-- **Prompt Injection Sanitizer** — regex-based detection with strip/reject actions
-- **Skill Supply-Chain Scanner** — tree-sitter AST analysis + pattern matching for dangerous APIs, network exfiltration, and filesystem abuse
-- **Quarantine System** — SQLite-backed quarantine with force-override and audit trail
-- **Egress Allowlist** — DNS-level filtering via CoreDNS sidecar (only approved domains resolve)
-- **Audit Logging** — append-only JSON Lines log for all security events
-- **One-Click Deployment** — `install.sh` generates tokens, validates prereqs, launches Docker Compose
-
-## Target Use Case
-Self-hosting OpenClaw in environments where security, auditability, and network isolation are required — small teams, enterprise pilots, regulated environments.
-
-## Key Value Proposition
-Run OpenClaw safely without trusting third-party skills or exposing your infrastructure. Zero modifications to OpenClaw itself — the security stack operates as a sidecar/proxy layer.
+## Vision
+Enable teams to self-host OpenClaw in production environments with a default-secure posture, clear operational controls, and auditable security decisions.
 
 ## Target Users
-- DevOps engineers deploying OpenClaw for their team
-- Security-conscious developers who want LLM agent tooling without open network access
-- Organizations requiring audit trails for AI agent actions
+- **Primary:** Platform engineers and security-conscious developers deploying OpenClaw for internal tools or automation
+- **Secondary:** DevOps/SRE teams responsible for runtime hardening, auditability, and incident response
+
+## Core Features
+1. Reverse proxy protection - Enforces bearer-token authentication and request sanitization before forwarding to OpenClaw.
+2. Skill security pipeline - AST-based JS/TS scanner detects dangerous APIs, exfiltration patterns, and filesystem abuse; risky skills can be quarantined.
+3. Prompt injection defense - Rule-based strip/reject actions for known prompt-injection patterns.
+4. Governance layer - Tool-call intent classification, policy validation, plan/session tracking, and human approval gates.
+5. Network isolation and egress control - Docker network segmentation plus DNS allowlisting for outbound traffic.
+6. Security audit trail - Append-only JSONL events for auth, sanitizer actions, and scanner/governance outcomes.
+
+## Key Value Propositions
+- Adds defense-in-depth around OpenClaw while keeping upstream compatibility.
+- Reduces risk from third-party skills and prompt-level attacks before they execute.
+- Improves compliance and forensics with structured, persistent audit events.
+- Supports practical operations through containerized deployment and scripted installation.
 
 ## Success Metrics
-- >= 95% detection rate on known-malicious skill patterns
-- Zero hardcoded secrets in codebase
-- Container image < 100MB (excluding OpenClaw)
-- Clone-to-running in under 5 minutes
-
-## Technical Advantages
-- **Sidecar architecture** — no upstream modifications, easy to upgrade OpenClaw independently
-- **Fail-closed design** — missing config = deny all, not allow all
-- **Constant-time auth** — prevents timing-based token extraction
-- **AST-based scanning** — catches obfuscated patterns that regex alone misses
-- **DNS-level egress** — skills cannot resolve non-allowlisted domains at all
+- Proxy blocks 100% of unauthenticated requests in integration tests.
+- Scanner catches known malicious patterns across security test corpus.
+- Audit log records all critical security events with no silent drops.
+- Test suite and CI checks remain green with coverage at or above configured threshold.
+- New OpenClaw releases remain adoptable without patching upstream source.

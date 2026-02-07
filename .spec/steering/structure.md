@@ -1,80 +1,97 @@
 # Project Structure
 
-## Directory Organization
-```
+## Directory Layout
+```text
 openclaw-secure-stack/
-├── src/                          # Source code
-│   ├── models.py                 # Shared Pydantic data models (enums, findings, events)
-│   ├── audit/
-│   │   └── logger.py             # Append-only JSON Lines audit logger
-│   ├── proxy/
-│   │   ├── auth_middleware.py     # ASGI Bearer token auth middleware
-│   │   └── app.py                # FastAPI reverse proxy with body sanitization
-│   ├── scanner/
-│   │   ├── scanner.py            # Core scanner engine (rule loading, file scanning)
-│   │   ├── cli.py                # Click CLI for scan/quarantine commands
-│   │   ├── trust_score.py        # Trust score computation
-│   │   └── rules/
-│   │       ├── dangerous_api.py  # AST rule: eval, Function, child_process
-│   │       ├── network_exfil.py  # AST rule: fetch, XMLHttpRequest, http/https
-│   │       └── fs_abuse.py       # AST rule: writeFile, unlink, rmSync
-│   ├── quarantine/
-│   │   ├── db.py                 # SQLite quarantine database
-│   │   └── manager.py            # Quarantine lifecycle (quarantine, override, rescan)
-│   └── sanitizer/
-│       └── sanitizer.py          # Prompt injection detection and stripping
-├── config/
-│   ├── scanner-rules.json        # Scanner rule definitions
-│   ├── prompt-rules.json         # Prompt injection regex rules
-│   └── egress-allowlist.conf     # Allowed external domains
-├── docker/
-│   └── egress/
-│       ├── Corefile              # CoreDNS configuration
-│       ├── Dockerfile            # CoreDNS sidecar image
-├── tests/
-│   ├── conftest.py               # Shared test fixtures
-│   ├── unit/                     # Unit tests (70% of suite)
-│   ├── integration/              # Integration tests (20% of suite)
-│   └── security/                 # Security/adversarial test suite (10%)
-├── .spec/                        # SDD workflow files
-│   ├── steering/                 # Project steering documents
-│   └── specs/                    # Feature specifications
-├── Dockerfile                    # Multi-stage build (distroless runtime)
-├── docker-compose.yml            # Orchestration with security hardening
-├── build.sh                      # Docker image build script
-├── install.sh                    # One-click deployment script
-├── pyproject.toml                # Project config and dependencies
-├── .env.example                  # Environment variable template
-└── .gitignore
+|-- src/
+|   |-- proxy/              # FastAPI app and auth middleware
+|   |-- sanitizer/          # Prompt injection strip/reject logic
+|   |-- scanner/            # AST scanner engine, CLI, trust scoring, rule implementations
+|   |   `-- rules/          # Rule modules by detection category (base.py = abstract base class)
+|   |-- quarantine/         # SQLite persistence + quarantine manager
+|   |-- governance/         # Intent classifier, planner, validator, approver, enforcer, session/store
+|   |   `-- middleware.py   # ASGI middleware integration point for governance in the proxy pipeline
+|   |-- audit/              # JSONL append-only logger
+|   `-- models.py           # Shared Pydantic models
+|-- tests/
+|   |-- unit/               # Module-level tests
+|   |-- integration/        # Cross-module behavior tests
+|   `-- security/           # Adversarial and abuse-path tests
+|-- config/                 # JSON policy/rule files and network allowlist inputs
+|-- docs/                   # User and developer quickstarts
+|-- scripts/                # Operational scripts (e.g., audit)
+|-- docker/                 # CoreDNS and Caddy runtime config
+|-- plugins/prompt-guard/   # OpenClaw plugin hook (TypeScript)
+|-- .spec/
+|   |-- steering/           # Project steering context docs
+|   `-- specs/              # SDD feature specifications
+|-- pyproject.toml          # Python project metadata and tool config
+|-- docker-compose.yml      # Service topology and hardening options
+|-- Dockerfile              # Container image build for secure-stack proxy
+|-- build.sh                # Build automation script
+|-- install.sh              # Installation helper script
+|-- .env.example            # Environment variable template
+|-- CHANGELOG.md            # Release history
+`-- README.md
 ```
 
-## Key Directories
-- **src/proxy/**: Reverse proxy layer — auth + request forwarding + body sanitization
-- **src/scanner/**: Static analysis engine — AST rules + pattern matching + CLI
-- **src/quarantine/**: Quarantine lifecycle — SQLite state + file management
-- **src/sanitizer/**: Prompt injection detection — regex rules with strip/reject
-- **src/audit/**: Security event logging — append-only JSON Lines
-- **config/**: Runtime configuration files (rules, allowlists)
-- **docker/**: Container infrastructure (CoreDNS egress sidecar)
+## Naming Conventions
 
-## Code Organization Patterns
-- **Layered architecture**: proxy → sanitizer → upstream; scanner → quarantine → audit
-- **Dependency injection**: components accept `audit_logger` parameter, None = no logging
-- **Immutable models**: Pydantic `frozen=True` for all data models
-- **Fail-closed**: missing config raises exceptions rather than allowing all
+### Files
+| Type | Convention | Example |
+|------|------------|---------|
+| Python modules | `snake_case.py` | `auth_middleware.py` |
+| Package markers | `__init__.py` | `src/scanner/__init__.py` |
+| Tests | `test_<subject>.py` | `test_auth_middleware.py` |
+| Config | kebab-case JSON/conf | `scanner-rules.json` |
+| Scripts | `snake_case.py` | `audit.py` |
 
-## File Naming Conventions
-- **Source files**: snake_case.py (e.g., `auth_middleware.py`)
-- **Test files**: test_<module>.py (e.g., `test_auth_middleware.py`)
-- **Configuration**: kebab-case.json/conf (e.g., `scanner-rules.json`)
-- **Constants**: UPPER_SNAKE_CASE
-- **Functions/Variables**: snake_case
-- **Classes**: PascalCase
-- **Enums**: PascalCase with UPPER_SNAKE_CASE members
+### Code
+| Element | Convention | Example |
+|---------|------------|---------|
+| Classes / Pydantic models | PascalCase | `ScanFinding` |
+| Functions / methods / vars | snake_case | `create_app_from_env` |
+| Constants | UPPER_SNAKE_CASE | `OPENCLAW_TOKEN` |
+| Module-private helpers | leading underscore where useful | `_load_rules` |
+
+## Module Organization Rules
+- Keep security concerns separated by domain (`auth`, `sanitizer`, `scanner`, `governance`, `audit`).
+- Share cross-module schemas only through `src/models.py` and governance-local models in `src/governance/models.py`.
+- Place scanner detection logic under `src/scanner/rules/`; keep CLI orchestration in `src/scanner/cli.py`.
+- Keep persistence abstractions close to their domain (`quarantine/db.py`, `governance/db.py`, `governance/store.py`).
+
+## Import and Dependency Patterns
+1. Standard library imports
+2. Third-party imports
+3. `src` package imports
+4. Relative imports only when local clarity is improved
+
+Prefer explicit imports and avoid circular dependencies between core modules.
+
+## Testing Structure
+- `tests/unit/`: deterministic, fast tests for single modules/classes.
+- `tests/integration/`: request/response and component interaction coverage.
+- `tests/security/`: malicious skill and abuse scenarios.
+
+When adding functionality, add or update tests in the matching suite first; keep security-sensitive logic covered by explicit adversarial cases.
+
+## Configuration and Policy Files
+- `config/scanner-rules.json`: scanner rule metadata and patterns
+- `config/prompt-rules.json`: prompt injection detection rules
+- `config/indirect-injection-rules.json`: tool-result injection rules
+- `config/governance-policies.json`: governance validation policy
+- `config/intent-patterns.json`: intent classifier patterns
+- `config/egress-allowlist.conf`: DNS allowlist for outbound network access
+- `config/skill-pins.json`: skill integrity pins for trust verification
+
+Treat `config/` as policy-as-code: prefer data-driven changes there before hardcoding behavior.
 
 ## Architectural Principles
-- **Sidecar pattern**: Security stack wraps OpenClaw without modification
-- **Separation of concerns**: Each module handles one security domain
-- **Defense in depth**: Multiple independent security layers
-- **Fail-closed**: Deny by default on missing or invalid configuration
-- **Auditability**: Every security-relevant action produces an audit event
+
+These principles guide all design and implementation decisions:
+
+1. **Fail-closed defaults** — When a security decision is ambiguous or a component errors, deny the operation. No request should pass through silently on failure.
+2. **Sidecar pattern** — The secure stack wraps upstream OpenClaw without patching it. All security controls live outside the upstream codebase and can be updated independently.
+3. **Separation of concerns by security domain** — Each module owns a single security responsibility (auth, sanitization, scanning, governance, audit). Cross-cutting behavior is composed at the proxy/middleware layer, not embedded in individual modules.
+4. **Defense-in-depth** — Multiple overlapping controls (authentication, input sanitization, governance validation, network isolation) ensure that no single bypass compromises the system.
+5. **Auditability guarantee** — Every security-relevant decision (allow, deny, quarantine, governance override) is recorded in the append-only audit log. Silent drops are treated as bugs.

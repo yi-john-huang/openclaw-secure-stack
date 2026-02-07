@@ -1,82 +1,98 @@
-# Technology Stack
+# Technology Overview
+
+## Stack
+
+### Language
+- **Primary:** Python
+- **Version:** 3.12+
+- **Runtime:** CPython with ASGI server for API path
+
+### Frameworks and Libraries
+- **FastAPI**: Reverse proxy HTTP API and middleware composition
+- **Uvicorn**: ASGI server for local and container runtime
+- **Pydantic v2**: Data models and validation
+- **HTTPX**: Upstream HTTP forwarding and integration points
+- **Click**: Scanner CLI commands
+- **tree-sitter + JS/TS grammars**: AST parsing for skill analysis
+
+### Build System
+- **Hatchling**: PEP 517 build backend (configured in `pyproject.toml`)
+
+### Supporting Tech
+- **Docker / Docker Compose**: Deployment and network isolation
+- **SQLite**: Quarantine state and governance persistence
+- **CoreDNS**: DNS forwarding with allowlist policy
+- **Caddy**: HTTPS edge for control UI
+- **TypeScript plugin**: `plugins/prompt-guard` hook for tool-result sanitization
 
 ## Architecture
-**Type**: Sidecar / Reverse Proxy
-**Language**: Python 3.12+
-**Module System**: Standard Python packages
-**Framework**: FastAPI (async ASGI)
-**Build Tool**: Hatchling + uv
 
-## Core Technologies
-- **Runtime**: Python 3.12+ (CPython)
-- **Language**: Python with type annotations
-- **Framework**: FastAPI + Starlette (ASGI middleware)
-- **Testing**: pytest + pytest-asyncio + pytest-cov
-- **Parsing**: tree-sitter + tree-sitter-javascript (AST analysis)
-- **HTTP Client**: httpx (async proxy forwarding)
-- **Data Validation**: Pydantic v2 (frozen models)
-- **Database**: SQLite via stdlib sqlite3 (quarantine state)
-- **CLI**: Click (scanner/quarantine CLI)
-- **DNS Filtering**: CoreDNS (egress sidecar)
+### Pattern
+Security wrapper around an unmodified upstream service, with modular security components and policy-driven governance.
+
+### Runtime Flow
+```text
+Client -> Proxy (auth + sanitizer + governance hooks) -> OpenClaw
+                       |
+                       +-> Audit logger
+
+Offline/administrative flow:
+Skill file -> Scanner (AST rules) -> Quarantine manager (SQLite)
+```
+
+### Logical Modules
+- `proxy`: FastAPI app and auth middleware
+- `sanitizer`: Prompt injection rules engine
+- `governance`: Intent classification, planning, validation, approval, enforcement, session/store
+- `governance/middleware`: ASGI middleware that integrates governance checks into the proxy pipeline
+- `scanner`: AST scanning engine, trust scoring, CLI
+- `quarantine`: Persistence and lifecycle for blocked skills
+- `audit`: Append-only JSONL security events
 
 ## Development Environment
-- **Runtime Version**: Python >= 3.12
-- **Package Manager**: uv (fast Python package manager)
-- **Testing Framework**: pytest
-- **Linting**: ruff
 
-## Dependencies
-### Production Dependencies
-- `fastapi` — ASGI web framework
-- `uvicorn` — ASGI server
-- `httpx` — async HTTP client for proxying
-- `pydantic>=2.0` — data models with validation
-- `click` — CLI framework
-- `tree-sitter` — incremental parsing library
-- `tree-sitter-javascript` — JavaScript grammar for tree-sitter
-- `tree-sitter-typescript` — TypeScript grammar for tree-sitter
+### Prerequisites
+- Python 3.12+
+- `uv` package/runtime manager
+- Docker 20.10+ and Docker Compose v2+ for containerized stack
 
-### Development Dependencies
-- `pytest` + `pytest-asyncio` + `pytest-cov` — testing
-- `ruff` — linting and formatting
-- `mypy` — static type checking
-- `pytest-httpx` — httpx mocking
-
-## Development Commands
+### Setup
 ```bash
-# Install dependencies
 uv sync
-
-# Run all tests
 uv run pytest tests/ -q
-
-# Run tests with coverage
-uv run pytest tests/ --cov=src --cov-report=term-missing
-
-# Lint
-uv run ruff check src/ tests/
-
-# Lint with auto-fix
-uv run ruff check --fix src/ tests/
-
-# Type check
-uv run mypy src/
-
-# Run scanner CLI
-uv run python -m src.scanner.cli scan <skill-path>
-
-# Start proxy server (dev)
 uv run uvicorn src.proxy.app:create_app_from_env --factory --reload
 ```
 
-## Quality Assurance
-- **Linting**: ruff (line-length 100, Python 3.12 target)
-- **Type Checking**: mypy with strict mode
-- **Testing**: 112 tests across unit, integration, and security suites
-- **Security**: OWASP Top 10 aligned, constant-time comparisons, no hardcoded secrets
+### Common Commands
+| Command | Purpose |
+|---------|---------|
+| `uv sync` | Install project and dev dependencies |
+| `uv run pytest tests/ -q` | Run full test suite |
+| `uv run ruff check src/ tests/` | Lint code |
+| `uv run mypy src/` | Type checking |
+| `uv run python -m src.scanner.cli scan <file>` | Scan a JS/TS skill |
+| `openclaw-scanner scan <file>` | Scan via installed CLI entry point |
+| `python scripts/audit.py` | Run security posture audit |
+| `docker compose up -d --build` | Build and start stack |
 
-## Deployment Configuration
-- **Containerization**: Docker with multi-stage build (distroless Python runtime)
-- **Orchestration**: Docker Compose with security hardening
-- **Build Process**: `docker compose build` or `install.sh`
-- **Security Hardening**: read-only filesystem, dropped capabilities, non-root user, internal network
+## Quality Standards
+- Coverage gate configured at **90%** (`tool.coverage.report.fail_under`)
+- Linting via Ruff (`E,F,W,I,N,UP,B,SIM` rulesets)
+- Strict mypy mode enabled for `src/`
+- Tests organized into unit, integration, and security suites
+
+## Dependency Baseline
+
+### Production Dependencies
+- `fastapi`, `uvicorn[standard]`, `httpx`, `pydantic`, `click`
+- `tree-sitter`, `tree-sitter-javascript`, `tree-sitter-typescript`
+
+### Development Dependencies
+- `pytest`, `pytest-asyncio`, `pytest-cov`, `pytest-httpx`
+- `ruff`, `mypy`
+
+## Deployment Notes
+- Containerized runtime with hardened defaults (read-only FS, non-root, dropped capabilities, no-new-privileges)
+- Network segmentation via Docker networks; OpenClaw not exposed directly by default
+- DNS egress constrained by allowlist configuration in `config/egress-allowlist.conf`
+- Skill integrity pins defined in `config/skill-pins.json`
