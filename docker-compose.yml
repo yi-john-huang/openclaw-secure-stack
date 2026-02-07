@@ -1,5 +1,8 @@
 version: "3.9"
 
+# Before first run, create local bind-mount directories:
+# mkdir -p .local-volumes/{proxy-data,openclaw-data,caddy-data,caddy-config}
+
 services:
   proxy:
     build: .
@@ -30,7 +33,7 @@ services:
       - WEBHOOK_RATE_LIMIT=${WEBHOOK_RATE_LIMIT:-60}
       - REPLAY_DB_PATH=/app/data/replay.db
     volumes:
-      - audit-data:/app/data
+      - ./.local-volumes/proxy-data:/app/data
       - ./config/quarantine-list.json:/app/config/quarantine-list.json:ro
     networks:
       - internal
@@ -64,7 +67,7 @@ services:
       - PROMPT_GUARD_ENFORCEMENT=${PROMPT_GUARD_ENFORCEMENT:-true}
       - QUARANTINE_LIST_PATH=/home/openclaw/config/quarantine-list.json
     volumes:
-      - openclaw-data:/home/openclaw/.openclaw
+      - ./.local-volumes/openclaw-data:/home/openclaw/.openclaw
       - ./plugins/prompt-guard:/home/openclaw/plugins/prompt-guard:ro
       - ./config/indirect-injection-rules.json:/home/openclaw/config/indirect-injection-rules.json:ro
       - ./config/quarantine-list.json:/home/openclaw/config/quarantine-list.json:ro
@@ -95,8 +98,8 @@ services:
       - "${CADDY_PORT:-8443}:443"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
+      - ./.local-volumes/caddy-data:/data
+      - ./.local-volumes/caddy-config:/config
     networks:
       - internal
     depends_on:
@@ -126,12 +129,6 @@ services:
     security_opt:
       - no-new-privileges:true
     user: "65534"
-
-volumes:
-  audit-data:
-  openclaw-data:
-  caddy-data:
-  caddy-config:
 
 networks:
   internal:

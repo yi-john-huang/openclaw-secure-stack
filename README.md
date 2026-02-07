@@ -360,7 +360,7 @@ The audit checks: container hardening, network isolation, secret management, log
 | DNS resolution fails | CoreDNS not healthy | Check `docker compose logs egress-dns`; verify `config/allowlist.db` exists |
 | Certificate errors | Caddy can't issue cert | Verify domain DNS points to this host; check `docker compose logs caddy` |
 | Skill quarantined unexpectedly | Scanner detected suspicious patterns | Review findings with `uv run python -m src.scanner.cli quarantine list`; override with `quarantine override` if false positive |
-| Audit log not writing | Volume permissions | Check `audit-data` volume mount; ensure container UID 65534 can write |
+| Audit log not writing | Volume permissions | Check `./.local-volumes/proxy-data` mount; ensure container UID 65534 can write |
 | `scripts/audit.py` exits 2 | Docker/Podman not found | Install Docker >= 20.10 or Podman |
 | 429 on webhook | Rate limit exceeded | Increase `WEBHOOK_RATE_LIMIT` in `.env` or wait for window to reset |
 | 413 on webhook | Request body too large | Webhook payloads are limited to 10MB |
@@ -378,6 +378,9 @@ The audit checks: container hardening, network isolation, secret management, log
 ```bash
 # Full rebuild (no cache)
 docker compose build --no-cache
+
+# Ensure local bind-mount folders exist
+mkdir -p .local-volumes/{proxy-data,openclaw-data,caddy-data,caddy-config}
 
 # Restart services
 docker compose up -d

@@ -14,19 +14,24 @@ COPY src/ src/
 COPY config/ config/
 RUN uv sync --frozen --no-dev
 
-# Stage 2: Distroless runtime - no shell, no package manager, minimal attack surface
-# To find latest: podman pull gcr.io/distroless/python3-debian12:nonroot && podman inspect --format='{{index .RepoDigests 0}}' gcr.io/distroless/python3-debian12:nonroot
-FROM gcr.io/distroless/python3-debian12:nonroot@sha256:17b27c84c985a53d0cd2adef4f196ca327fa9b6755369be605cf45533b4e700b AS runtime
+# Stage 2: Slim runtime — same Python 3.12 as builder to avoid native extension ABI mismatch.
+# distroless/python3-debian12 only ships Python 3.11, which breaks pydantic_core's compiled .so files.
+# To find latest digest: podman pull python:3.12-slim && podman inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+FROM python:3.12-slim AS runtime
+
+# Hardening: create non-root user matching distroless UID convention
+RUN groupadd -g 65532 nonroot && \
+    useradd -u 65532 -g 65532 -s /usr/sbin/nologin -d /app nonroot
 
 WORKDIR /app
 
 # Copy the venv and app code from builder
-# Distroless has Python at /usr/bin/python3, we copy our venv's site-packages
 COPY --from=builder /app/.venv/lib/python3.12/site-packages /app/site-packages
 COPY --from=builder /app/src /app/src
 COPY --from=builder /app/config /app/config
 
-# nonroot image already runs as non-root user (65532)
+# Drop to non-root
+USER nonroot
 
 ENV PYTHONPATH=/app/src:/app/site-packages \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -34,5 +39,4 @@ ENV PYTHONPATH=/app/src:/app/site-packages \
 
 EXPOSE 8080
 
-# Use exec form - distroless has no shell
 ENTRYPOINT ["python3", "-m", "uvicorn", "src.proxy.app:create_app_from_env", "--host", "0.0.0.0", "--port", "8080", "--factory"]

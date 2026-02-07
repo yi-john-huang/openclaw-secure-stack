@@ -35,3 +35,6 @@ worktrees/
 
 # OS
 .DS_Store
+
+# local volumes
+.local-volumes
