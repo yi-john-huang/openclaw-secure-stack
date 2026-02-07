@@ -17,19 +17,21 @@ PUBLIC_PATHS = {"/health", "/healthz", "/ready"}
 # Path prefixes that bypass authentication
 PUBLIC_PREFIXES = ("/__openclaw__/canvas",)
 
-# Webhook paths that bypass Bearer auth (use their own signature-based HMAC auth).
-# Populated at app creation time by _register_webhook_routes() — only actually
-# registered webhook paths are added, preventing auth bypass via the catch-all route.
-PUBLIC_WEBHOOK_PATHS: set[str] = set()
-
 
 class AuthMiddleware:
     """ASGI middleware that validates Bearer tokens using constant-time comparison."""
 
-    def __init__(self, app: ASGIApp, token: str, audit_logger: AuditLogger | None = None) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        token: str,
+        audit_logger: AuditLogger | None = None,
+        webhook_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self.app = app
         self._token = token.encode()
         self.audit_logger = audit_logger
+        self._webhook_paths = webhook_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -40,7 +42,7 @@ class AuthMiddleware:
         path = request.url.path
 
         # Skip auth for public paths and registered webhook paths
-        if path in PUBLIC_PATHS or path in PUBLIC_WEBHOOK_PATHS or path.startswith(PUBLIC_PREFIXES):
+        if path in PUBLIC_PATHS or path in self._webhook_paths or path.startswith(PUBLIC_PREFIXES):
             await self.app(scope, receive, send)
             return
 

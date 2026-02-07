@@ -124,6 +124,29 @@ class TestWebhookAuthBypass:
             body = resp.json()
             assert body["error"] == "Invalid webhook signature"
 
+    @pytest.mark.asyncio
+    async def test_webhook_auth_does_not_leak_across_app_instances(
+        self, tmp_path: Path,
+    ) -> None:
+        """Webhook paths from one app must NOT leak into another app instance."""
+        # App 1: Telegram enabled — /webhook/telegram should work
+        _make_app_with_sanitizer(tmp_path, telegram_bot_token="123:ABC")
+
+        # App 2: No webhooks — /webhook/telegram must require auth
+        app2_dir = tmp_path / "app2"
+        app2_dir.mkdir()
+        app2 = _make_app_with_sanitizer(app2_dir)
+        transport = ASGITransport(app=app2)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/webhook/telegram",
+                json=_make_telegram_update(),
+            )
+            # Should require Bearer auth (401), NOT bypass it
+            assert resp.status_code == 401
+            body = resp.json()
+            assert body["error"] == "Authentication required"
+
 
 class TestWebhookRouteRegistration:
     """NFR-2: Webhook routes conditionally registered."""

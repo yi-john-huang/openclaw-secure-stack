@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.audit.logger import AuditLogger
 from src.models import AuditEvent, AuditEventType, RiskLevel
-from src.proxy.auth_middleware import PUBLIC_WEBHOOK_PATHS, AuthMiddleware
+from src.proxy.auth_middleware import AuthMiddleware
 from src.proxy.governance_helpers import (
     evaluate_governance,
     has_tool_calls,
@@ -179,7 +179,7 @@ def create_app(
         app.include_router(gov_router)
 
     # Register webhook routes conditionally (NFR-2)
-    _register_webhook_routes(
+    webhook_paths = _register_webhook_routes(
         app=app,
         upstream_url=upstream_url,
         token=token,
@@ -298,7 +298,12 @@ def create_app(
             return JSONResponse({"error": "Upstream unavailable"}, status_code=502)
 
     # Add auth middleware (wraps the entire app)
-    app.add_middleware(AuthMiddleware, token=token, audit_logger=audit_logger)
+    app.add_middleware(
+        AuthMiddleware,
+        token=token,
+        audit_logger=audit_logger,
+        webhook_paths=frozenset(webhook_paths),
+    )
 
     return app
 
@@ -317,10 +322,14 @@ def _register_webhook_routes(
     replay_db_path: str,
     webhook_rate_limit: int,
     whatsapp_replay_window: int,
-) -> None:
-    """Register webhook routes only when corresponding tokens are configured (NFR-2)."""
+) -> set[str]:
+    """Register webhook routes only when corresponding tokens are configured (NFR-2).
+
+    Returns the set of registered webhook paths that should bypass Bearer auth.
+    """
+    registered_paths: set[str] = set()
     if not telegram_bot_token and not whatsapp_config:
-        return
+        return registered_paths
 
     from src.webhook.rate_limiter import WebhookRateLimiter
     from src.webhook.relay import WebhookRelayPipeline
@@ -346,7 +355,7 @@ def _register_webhook_routes(
 
         tg_relay = TelegramRelay(bot_token=telegram_bot_token)
 
-        PUBLIC_WEBHOOK_PATHS.add("/webhook/telegram")
+        registered_paths.add("/webhook/telegram")
 
         @app.post("/webhook/telegram")
         async def telegram_webhook(request: Request) -> Response:
@@ -442,7 +451,7 @@ def _register_webhook_routes(
             access_token=whatsapp_config["access_token"],
         )
 
-        PUBLIC_WEBHOOK_PATHS.add("/webhook/whatsapp")
+        registered_paths.add("/webhook/whatsapp")
 
         @app.get("/webhook/whatsapp")
         async def whatsapp_verification(request: Request) -> Response:
@@ -554,6 +563,8 @@ def _register_webhook_routes(
                         logging.exception("Failed to send WhatsApp response")
 
             return JSONResponse({"status": "ok"}, status_code=200)
+
+    return registered_paths
 
 
 def _strip_hop_by_hop(headers: httpx.Headers) -> dict[str, str]:
