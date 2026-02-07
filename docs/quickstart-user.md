@@ -4,12 +4,12 @@ Operations guide for deploying and running OpenClaw Secure Stack.
 
 ## What You Get After Install
 
-Running `./install.sh` starts five containers:
+Running `./install.sh` starts four containers:
 
 | Container | Role | Port |
 |-----------|------|------|
-| **proxy** | Reverse proxy — authenticates API requests, sanitizes prompts, forwards to OpenClaw | `${PROXY_PORT:-8080}` on the host |
-| **openclaw** | OpenClaw gateway — serves WebSocket + HTTP API | `3000` on the host |
+| **proxy** | Reverse proxy — authenticates requests, sanitizes prompts, evaluates governance, handles webhooks, forwards to OpenClaw | `${PROXY_PORT:-8080}` on the host |
+| **openclaw** | OpenClaw gateway — serves WebSocket + HTTP API, runs the plugin hook | `3000` on the host |
 | **caddy** | HTTPS reverse proxy for the Control UI (self-signed cert for localhost) | `${CADDY_PORT:-8443}` on the host |
 | **egress-dns** | CoreDNS sidecar — forwards DNS queries to public resolvers | 172.28.0.10 (internal) |
 
@@ -133,10 +133,53 @@ To connect OpenClaw to Telegram:
    ```
    TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
    ```
-3. Restart: `docker compose restart openclaw`
-4. Send `/start` to your bot in Telegram — you'll receive a pairing code to approve
+3. Restart: `docker compose restart proxy`
+4. Messages sent to your bot are relayed through the secure proxy pipeline (sanitization, governance, response scanning) before reaching OpenClaw
 
-OpenClaw uses long-polling (outbound only), so no public domain or inbound ports are needed.
+The proxy exposes a `/webhook/telegram` endpoint. If you set a Telegram webhook URL pointing to your proxy's public address, incoming messages arrive there. Otherwise, you can use long-polling on the OpenClaw side.
+
+## WhatsApp Integration
+
+To connect OpenClaw to WhatsApp:
+
+1. Set up a WhatsApp Business API account and configure a webhook
+2. Add the credentials to `.env`:
+   ```
+   WHATSAPP_VERIFY_TOKEN=your-verify-token
+   WHATSAPP_APP_SECRET=your-app-secret
+   ```
+3. Point the WhatsApp webhook URL to `https://your-domain/webhook/whatsapp`
+4. Restart: `docker compose restart proxy`
+
+The proxy verifies incoming webhooks via HMAC signature (`X-Hub-Signature-256` header) using `WHATSAPP_APP_SECRET`. GET requests to `/webhook/whatsapp` handle the WhatsApp verification challenge. All messages pass through the same secure pipeline as Telegram (sanitization, governance, response scanning).
+
+## Governance Layer
+
+The governance layer evaluates tool-call requests before they reach OpenClaw. It applies configurable policies to classify, validate, and optionally require human approval for high-risk operations.
+
+### How It Works
+
+1. Proxy intercepts requests containing tool calls
+2. Intent classifier categorizes the tool call (file read/write, network, code execution, system)
+3. Policy validator checks against rules in `config/governance-policies.json`
+4. Low-risk operations proceed automatically; high-risk operations require human approval
+5. Approved plans receive HMAC-signed tokens for execution
+
+### Governance Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/governance/plans` | GET | List pending plans |
+| `/governance/plans/{id}/approve` | POST | Approve a pending plan |
+| `/governance/plans/{id}/reject` | POST | Reject a pending plan |
+
+### Configuring Policies
+
+Edit `config/governance-policies.json` to adjust which operations require approval. Policy types include:
+- **action policies** — allow/block by tool-call type
+- **resource policies** — restrict access to specific file paths or URLs
+- **sequence policies** — detect suspicious multi-step patterns
+- **rate policies** — limit operation frequency per session
 
 ## Reading the Audit Log
 
@@ -152,13 +195,21 @@ Event types include:
 - `auth_success` / `auth_failure` — authentication attempts
 - `prompt_injection` — detected prompt injection patterns
 - `skill_scan` / `skill_quarantine` / `skill_override` — scanner events
+- `governance_eval` / `governance_approve` / `governance_reject` — governance decisions
+- `webhook_relay` — webhook message processing (Telegram/WhatsApp)
 
 ## What Blocked Requests Look Like
 
 | Scenario | HTTP Status | Meaning |
 |----------|-------------|---------|
 | Missing or invalid token | 401 | Authentication failed |
+| Valid token but wrong permissions | 403 | Access denied |
 | Prompt injection detected (reject rule) | 400 | Request blocked by sanitizer |
+| Governance blocks a tool call | 403 | Blocked by governance policy |
+| Governance requires approval | 202 | Pending human approval (includes approval ID) |
+| Webhook rate limit exceeded | 429 | Too many messages from this sender |
+| Webhook body too large | 413 | Request body exceeds 10 MB limit |
+| Webhook replay detected | 409 | Duplicate message (nonce already seen) |
 | Suspicious network call in skill | Scanner finding | Flagged by AST-based code scanner |
 
 ## Re-running the Installer
@@ -176,4 +227,7 @@ Running `./install.sh` again is safe. It will:
 4. **Container won't start**: Run `docker compose logs` to see error output. Common cause: port conflict on `PROXY_PORT`.
 5. **Skills blocked unexpectedly**: Check scanner findings with `uv run python -m src.scanner.cli scan <skill-path>`. Review `config/scanner-rules.json` for rule definitions.
 6. **Control UI "pairing required"**: Make sure you access via the tokenized URL: `https://localhost:8443/?token=YOUR_TOKEN`. The installer configures `allowInsecureAuth` to bypass device pairing in Docker.
-7. **Telegram bot not responding**: Check `docker compose logs openclaw | grep telegram`. Verify `TELEGRAM_BOT_TOKEN` is set in `.env`.
+7. **Telegram bot not responding**: Check `docker compose logs proxy | grep telegram`. Verify `TELEGRAM_BOT_TOKEN` is set in `.env`.
+8. **WhatsApp webhook 403**: Verify `WHATSAPP_APP_SECRET` is set in `.env` and the `X-Hub-Signature-256` header is being sent by WhatsApp.
+9. **Governance blocking everything**: Review `config/governance-policies.json`. Policies may be too restrictive. Check pending plans via `GET /governance/plans`.
+10. **Webhook 413 errors**: The request body exceeds the 10 MB limit. This is a hard limit to prevent memory exhaustion.

@@ -32,19 +32,28 @@ Security wrapper around an unmodified upstream service, with modular security co
 
 ### Runtime Flow
 ```text
-Client -> Proxy (auth + sanitizer + governance hooks) -> OpenClaw
-                       |
-                       +-> Audit logger
+API Client -> Proxy (auth → sanitizer → governance → forward) -> OpenClaw
+                                    |
+                                    +-> Audit logger
+
+Webhook (Telegram/WhatsApp) -> Proxy (signature → rate limit → replay →
+    sanitize → governance → quarantine → forward → response scan) -> OpenClaw
+                                    |
+                                    +-> Audit logger
+
+Plugin Hook (inside OpenClaw):
+Tool result -> prompt-guard plugin (indirect injection scan) -> sanitized result
 
 Offline/administrative flow:
 Skill file -> Scanner (AST rules) -> Quarantine manager (SQLite)
 ```
 
 ### Logical Modules
-- `proxy`: FastAPI app and auth middleware
+- `proxy`: FastAPI app, auth middleware, governance helpers, webhook handlers
+- `webhook`: Telegram/WhatsApp relay pipeline (sanitize → governance → quarantine → forward → scan)
 - `sanitizer`: Prompt injection rules engine
 - `governance`: Intent classification, planning, validation, approval, enforcement, session/store
-- `governance/middleware`: ASGI middleware that integrates governance checks into the proxy pipeline
+- `governance/middleware`: GovernanceMiddleware for proxy and webhook pipelines
 - `scanner`: AST scanning engine, trust scoring, CLI
 - `quarantine`: Persistence and lifecycle for blocked skills
 - `audit`: Append-only JSONL security events
