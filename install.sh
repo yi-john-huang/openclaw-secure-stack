@@ -166,7 +166,9 @@ main() {
         cp .env.example .env
         TOKEN=$(generate_token)
         sed_inplace "s|OPENCLAW_TOKEN=.*|OPENCLAW_TOKEN=$TOKEN|" .env
-        info "Generated .env with random API token"
+        GOV_SECRET=$(generate_token)
+        sed_inplace "s|GOVERNANCE_SECRET=.*|GOVERNANCE_SECRET=$GOV_SECRET|" .env
+        info "Generated .env with random API token and governance secret"
     fi
 
     # Generate DNS zone file

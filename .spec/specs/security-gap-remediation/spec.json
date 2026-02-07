@@ -1,0 +1,22 @@
+{
+  "feature_name": "security-gap-remediation",
+  "created_at": "2026-02-07T12:15:27.187Z",
+  "updated_at": "2026-02-07T12:40:46.969Z",
+  "language": "en",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}

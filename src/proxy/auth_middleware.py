@@ -15,7 +15,8 @@ from src.models import AuditEvent, AuditEventType, RiskLevel
 PUBLIC_PATHS = {"/health", "/healthz", "/ready"}
 
 # Path prefixes that bypass authentication
-PUBLIC_PREFIXES = ("/__openclaw__/canvas",)
+# Webhook endpoints use their own signature-based auth (HMAC/secret token)
+PUBLIC_PREFIXES = ("/__openclaw__/canvas", "/webhook/")
 
 
 class AuthMiddleware:
