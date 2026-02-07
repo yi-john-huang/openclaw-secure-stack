@@ -399,6 +399,7 @@ All Dockerfiles pin base images by SHA-256 digest. To update:
 
 - [User Quick Start](docs/quickstart-user.md) — operations guide for deploying and running the stack
 - [Developer Quick Start](docs/quickstart-dev.md) — contributor guide for local development and extending the codebase
+- [Telegram Webhook Setup](docs/telegram-webhook-setup.md) — connect your Telegram bot with Cloudflare Tunnel
 
 ## License
 
