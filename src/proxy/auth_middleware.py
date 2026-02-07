@@ -15,8 +15,12 @@ from src.models import AuditEvent, AuditEventType, RiskLevel
 PUBLIC_PATHS = {"/health", "/healthz", "/ready"}
 
 # Path prefixes that bypass authentication
-# Webhook endpoints use their own signature-based auth (HMAC/secret token)
-PUBLIC_PREFIXES = ("/__openclaw__/canvas", "/webhook/")
+PUBLIC_PREFIXES = ("/__openclaw__/canvas",)
+
+# Webhook paths that bypass Bearer auth (use their own signature-based HMAC auth).
+# Populated at app creation time by _register_webhook_routes() — only actually
+# registered webhook paths are added, preventing auth bypass via the catch-all route.
+PUBLIC_WEBHOOK_PATHS: set[str] = set()
 
 
 class AuthMiddleware:
@@ -35,8 +39,8 @@ class AuthMiddleware:
         request = Request(scope)
         path = request.url.path
 
-        # Skip auth for public paths
-        if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+        # Skip auth for public paths and registered webhook paths
+        if path in PUBLIC_PATHS or path in PUBLIC_WEBHOOK_PATHS or path.startswith(PUBLIC_PREFIXES):
             await self.app(scope, receive, send)
             return
 

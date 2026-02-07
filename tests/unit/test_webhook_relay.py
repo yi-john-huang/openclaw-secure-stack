@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.governance.models import GovernanceDecision
 from src.webhook.models import WebhookMessage, WebhookResponse
 from src.webhook.relay import WebhookRelayPipeline
 
@@ -166,3 +167,101 @@ class TestWebhookRelayPipeline:
         assert result.status_code == 200
         # Audit event logged for injection detection
         assert audit.log.call_count >= 2  # relay event + injection event
+
+
+class TestWebhookGovernance:
+    """Governance evaluation in the webhook relay pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_governance_blocks_webhook_message(self) -> None:
+        """Governance BLOCK decision -> 403."""
+        from src.governance.middleware import EvaluationResult
+
+        governance = MagicMock()
+        governance.evaluate.return_value = EvaluationResult(
+            decision=GovernanceDecision.BLOCK,
+        )
+        sanitizer = MagicMock()
+        sanitizer.sanitize.return_value = MagicMock(clean="blocked", injection_detected=False)
+        pipeline = _make_pipeline(sanitizer=sanitizer, governance=governance)
+        msg = _make_webhook_message(text="blocked content")
+
+        result = await pipeline.relay(msg)
+        assert result.status_code == 403
+        assert "governance" in result.text.lower() or "blocked" in result.text.lower()
+        governance.evaluate.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_governance_requires_approval(self) -> None:
+        """Governance REQUIRE_APPROVAL decision -> 202."""
+        from src.governance.middleware import EvaluationResult
+
+        governance = MagicMock()
+        governance.evaluate.return_value = EvaluationResult(
+            decision=GovernanceDecision.REQUIRE_APPROVAL,
+            approval_id="approval-123",
+        )
+        sanitizer = MagicMock()
+        sanitizer.sanitize.return_value = MagicMock(
+            clean="needs approval", injection_detected=False,
+        )
+        pipeline = _make_pipeline(sanitizer=sanitizer, governance=governance)
+        msg = _make_webhook_message(text="needs approval")
+
+        result = await pipeline.relay(msg)
+        assert result.status_code == 202
+        assert "approval-123" in result.text
+        governance.evaluate.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_governance_allows_webhook_message(self) -> None:
+        """Governance ALLOW decision -> pipeline continues to upstream."""
+        from src.governance.middleware import EvaluationResult
+
+        governance = MagicMock()
+        governance.evaluate.return_value = EvaluationResult(
+            decision=GovernanceDecision.ALLOW,
+            plan_id="plan-1",
+            token="tok-1",
+        )
+        sanitizer = MagicMock()
+        sanitizer.sanitize.return_value = MagicMock(clean="hello", injection_detected=False)
+        pipeline = _make_pipeline(sanitizer=sanitizer, governance=governance)
+        msg = _make_webhook_message(text="hello")
+
+        with patch.object(pipeline, "_forward_to_upstream", new_callable=AsyncMock) as mock_fwd:
+            mock_fwd.return_value = WebhookResponse(text="world", status_code=200)
+            result = await pipeline.relay(msg)
+
+        assert result.status_code == 200
+        assert result.text == "world"
+        governance.evaluate.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_governance_audit_logged(self) -> None:
+        """Governance evaluation result is audit-logged."""
+        from src.governance.middleware import EvaluationResult
+
+        governance = MagicMock()
+        governance.evaluate.return_value = EvaluationResult(
+            decision=GovernanceDecision.ALLOW,
+        )
+        audit = MagicMock()
+        sanitizer = MagicMock()
+        sanitizer.sanitize.return_value = MagicMock(clean="hi", injection_detected=False)
+        pipeline = _make_pipeline(
+            sanitizer=sanitizer, governance=governance, audit_logger=audit,
+        )
+        msg = _make_webhook_message()
+
+        with patch.object(pipeline, "_forward_to_upstream", new_callable=AsyncMock) as mock_fwd:
+            mock_fwd.return_value = WebhookResponse(text="ok", status_code=200)
+            await pipeline.relay(msg)
+
+        # At least one audit log for governance eval, plus one for relay
+        assert audit.log.call_count >= 2
+        gov_logged = any(
+            call[0][0].action == "governance_eval"
+            for call in audit.log.call_args_list
+        )
+        assert gov_logged

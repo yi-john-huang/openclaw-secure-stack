@@ -93,6 +93,38 @@ def _make_app_with_sanitizer(tmp_path: Path, **kwargs: Any) -> Any:
     return create_app(**defaults)
 
 
+class TestWebhookAuthBypass:
+    """Verify that unregistered /webhook/* paths are NOT exempt from auth."""
+
+    @pytest.mark.asyncio
+    async def test_unregistered_webhook_path_requires_auth(self, tmp_path: Path) -> None:
+        """GET /webhook/foo should return 401, not proxy upstream (auth bypass fix)."""
+        app = _make_app_with_sanitizer(tmp_path, telegram_bot_token="123:ABC")
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/webhook/foo")
+            assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_registered_webhook_path_bypasses_bearer_auth(
+        self, tmp_path: Path,
+    ) -> None:
+        """POST /webhook/telegram should NOT require Bearer auth (uses HMAC instead)."""
+        app = _make_app_with_sanitizer(tmp_path, telegram_bot_token="123:ABC")
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # No Bearer token, but valid webhook endpoint — should not get 401 for missing Bearer
+            # (will get 401 for invalid HMAC instead, which is the webhook's own auth)
+            resp = await client.post(
+                "/webhook/telegram",
+                json=_make_telegram_update(),
+            )
+            # 401 from HMAC check, NOT from Bearer auth middleware
+            assert resp.status_code == 401
+            body = resp.json()
+            assert body["error"] == "Invalid webhook signature"
+
+
 class TestWebhookRouteRegistration:
     """NFR-2: Webhook routes conditionally registered."""
 
@@ -247,6 +279,54 @@ class TestTelegramEndpoints:
                     headers=headers,
                 )
                 assert resp.status_code == 429
+
+
+class TestWebhookBodySizeLimits:
+    """Body-size protection before JSON parse (defense-in-depth)."""
+
+    @pytest.mark.asyncio
+    async def test_telegram_oversized_body_413(self, tmp_path: Path) -> None:
+        """Oversized Telegram request body -> 413 before JSON parse."""
+        app = _make_app_with_sanitizer(tmp_path, telegram_bot_token="123:ABC")
+        headers = _make_telegram_headers("123:ABC")
+        # Create a body that exceeds the limit (patch to small value for test speed)
+        with patch("src.proxy.app._MAX_WEBHOOK_BODY_SIZE", 100):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                oversized_body = b"x" * 200
+                resp = await client.post(
+                    "/webhook/telegram",
+                    content=oversized_body,
+                    headers={**headers, "content-type": "application/json"},
+                )
+                assert resp.status_code == 413
+
+    @pytest.mark.asyncio
+    async def test_whatsapp_oversized_body_413(self, tmp_path: Path) -> None:
+        """Oversized WhatsApp request body -> 413 before JSON parse."""
+        app = _make_app_with_sanitizer(
+            tmp_path,
+            whatsapp_config={
+                "app_secret": "wa_secret",
+                "verify_token": "wa_verify",
+                "phone_number_id": "123456",
+                "access_token": "wa_token",
+            },
+        )
+        oversized_body = b"x" * 200
+        sig = _sign_whatsapp_body("wa_secret", oversized_body)
+        with patch("src.proxy.app._MAX_WEBHOOK_BODY_SIZE", 100):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/webhook/whatsapp",
+                    content=oversized_body,
+                    headers={
+                        "content-type": "application/json",
+                        "x-hub-signature-256": sig,
+                    },
+                )
+                assert resp.status_code == 413
 
 
 class TestWhatsAppEndpoints:

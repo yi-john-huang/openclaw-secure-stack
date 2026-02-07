@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.audit.logger import AuditLogger
 from src.models import AuditEvent, AuditEventType, RiskLevel
-from src.proxy.auth_middleware import AuthMiddleware
+from src.proxy.auth_middleware import PUBLIC_WEBHOOK_PATHS, AuthMiddleware
 from src.proxy.governance_helpers import (
     evaluate_governance,
     has_tool_calls,
@@ -31,6 +31,9 @@ from src.scanner.scanner import (
 
 if TYPE_CHECKING:
     from src.governance.middleware import GovernanceMiddleware
+
+# Maximum raw body size for webhook endpoints (defense-in-depth before JSON parse)
+_MAX_WEBHOOK_BODY_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 def create_app_from_env() -> FastAPI:
@@ -343,6 +346,8 @@ def _register_webhook_routes(
 
         tg_relay = TelegramRelay(bot_token=telegram_bot_token)
 
+        PUBLIC_WEBHOOK_PATHS.add("/webhook/telegram")
+
         @app.post("/webhook/telegram")
         async def telegram_webhook(request: Request) -> Response:
             # Rate limiting (NFR-8)
@@ -373,7 +378,11 @@ def _register_webhook_routes(
                     ))
                 return JSONResponse({"error": "Invalid webhook signature"}, status_code=401)
 
-            body = await request.json()
+            # Body size check before JSON parse (defense-in-depth)
+            raw_body = await request.body()
+            if len(raw_body) > _MAX_WEBHOOK_BODY_SIZE:
+                return JSONResponse({"error": "Request body too large"}, status_code=413)
+            body = json.loads(raw_body)
 
             # Replay protection (FR-2.7)
             update_id, text, chat_id = tg_relay.extract_message(body)
@@ -433,6 +442,8 @@ def _register_webhook_routes(
             access_token=whatsapp_config["access_token"],
         )
 
+        PUBLIC_WEBHOOK_PATHS.add("/webhook/whatsapp")
+
         @app.get("/webhook/whatsapp")
         async def whatsapp_verification(request: Request) -> Response:
             """Handle Meta webhook verification challenge (FR-3.6)."""
@@ -481,6 +492,9 @@ def _register_webhook_routes(
                     ))
                 return JSONResponse({"error": "Invalid webhook signature"}, status_code=401)
 
+            # Body size check before JSON parse (defense-in-depth)
+            if len(raw_body) > _MAX_WEBHOOK_BODY_SIZE:
+                return JSONResponse({"error": "Request body too large"}, status_code=413)
             payload = json.loads(raw_body)
             messages = wa_relay.extract_messages(payload)
 

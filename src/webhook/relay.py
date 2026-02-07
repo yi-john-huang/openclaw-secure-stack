@@ -26,6 +26,7 @@ from src.webhook.models import WebhookMessage, WebhookResponse
 
 if TYPE_CHECKING:
     from src.audit.logger import AuditLogger
+    from src.governance.middleware import GovernanceMiddleware
     from src.quarantine.manager import QuarantineManager
     from src.sanitizer.sanitizer import PromptSanitizer
 
@@ -47,7 +48,7 @@ class WebhookRelayPipeline:
         upstream_url: str,
         upstream_token: str,
         quarantine_manager: QuarantineManager | None = None,
-        governance: Any = None,
+        governance: GovernanceMiddleware | None = None,
         response_scanner: PromptSanitizer | None = None,
         audit_logger: AuditLogger | None = None,
     ) -> None:
@@ -78,6 +79,41 @@ class WebhookRelayPipeline:
                 text="Request rejected due to policy violation",
                 status_code=400,
             )
+
+        # Stage 2.5: Governance evaluation
+        if self._governance:
+            from src.governance.models import GovernanceDecision
+
+            gov_body: dict[str, Any] = {
+                "model": "default",
+                "messages": [{"role": "user", "content": clean_text}],
+                "metadata": {"source": message.source, **message.metadata},
+            }
+            gov_result = self._governance.evaluate(
+                gov_body, None, message.sender_id,
+            )
+            if self._audit:
+                self._audit.log(AuditEvent(
+                    event_type=AuditEventType.WEBHOOK_RELAY,
+                    action="governance_eval",
+                    result=gov_result.decision.value,
+                    risk_level=RiskLevel.INFO,
+                    details={
+                        "source": message.source,
+                        "sender_id": message.sender_id,
+                        "decision": gov_result.decision.value,
+                    },
+                ))
+            if gov_result.decision == GovernanceDecision.BLOCK:
+                return WebhookResponse(
+                    text="Blocked by governance policy",
+                    status_code=403,
+                )
+            if gov_result.decision == GovernanceDecision.REQUIRE_APPROVAL:
+                return WebhookResponse(
+                    text=f"Approval required (ID: {gov_result.approval_id})",
+                    status_code=202,
+                )
 
         # Stage 3: Quarantine check
         if self._quarantine:

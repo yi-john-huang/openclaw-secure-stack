@@ -31,7 +31,7 @@ services:
       - REPLAY_DB_PATH=/app/data/replay.db
     volumes:
       - audit-data:/app/data
-      - quarantine-config:/app/config/quarantine:ro
+      - ./config/quarantine-list.json:/app/config/quarantine-list.json:ro
     networks:
       - internal
     read_only: true
@@ -62,11 +62,12 @@ services:
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - PROMPT_GUARD_ENFORCEMENT=${PROMPT_GUARD_ENFORCEMENT:-true}
+      - QUARANTINE_LIST_PATH=/home/openclaw/config/quarantine-list.json
     volumes:
       - openclaw-data:/home/openclaw/.openclaw
       - ./plugins/prompt-guard:/home/openclaw/plugins/prompt-guard:ro
       - ./config/indirect-injection-rules.json:/home/openclaw/config/indirect-injection-rules.json:ro
-      - quarantine-config:/home/openclaw/config/quarantine:ro
+      - ./config/quarantine-list.json:/home/openclaw/config/quarantine-list.json:ro
     networks:
       - internal
       - egress
@@ -131,7 +132,6 @@ volumes:
   openclaw-data:
   caddy-data:
   caddy-config:
-  quarantine-config:
 
 networks:
   internal:
