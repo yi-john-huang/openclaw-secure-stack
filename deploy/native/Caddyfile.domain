@@ -1,0 +1,47 @@
+# Caddy configuration for public domain with Let's Encrypt TLS
+# Replace {$DOMAIN} with your actual domain name.
+# Requires DNS A/AAAA record pointing to this server's public IP.
+
+{$DOMAIN} {
+	# Reverse proxy to the Python FastAPI proxy on loopback
+	reverse_proxy 127.0.0.1:8080
+
+	# TLS: automatic Let's Encrypt certificate
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	# Logging
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+
+	# Security headers
+	header {
+		# Prevent clickjacking
+		X-Frame-Options "DENY"
+		# XSS protection
+		X-Content-Type-Options "nosniff"
+		# Referrer policy
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# CSP: restrict to same origin
+		Content-Security-Policy "default-src 'self'"
+		# HSTS: force HTTPS for 1 year
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	# Rate limiting (optional: uncomment to enable)
+	# rate_limit {
+	#     zone dynamic {
+	#         key {remote_host}
+	#         events 100
+	#         window 1m
+	#     }
+	# }
+}
+
+# HTTP → HTTPS redirect
+http://{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}

@@ -188,6 +188,79 @@ uv run python -m src.scanner.cli quarantine override skill-name \
     --ack "I accept the risk" --user admin
 ```
 
+## Alternative: Native Deployment (No Docker)
+
+For systems that cannot run Docker Desktop (e.g., older Mac Minis, headless Linux servers), you can deploy OpenClaw Secure Stack natively using systemd on **Ubuntu 24.04 LTS**.
+
+### When to Use Native Deployment
+
+- **Hardware constraints:** Older machines that can't run Docker Desktop
+- **Resource optimization:** Eliminate Docker daemon overhead (~200MB)
+- **Direct system integration:** Leverage systemd for service management and monitoring
+- **Learning/development:** Understand the stack's architecture without container abstractions
+
+### Quick Start (Native)
+
+```bash
+git clone https://github.com/yihuang/openclaw-secure-stack.git
+cd openclaw-secure-stack
+sudo bash deploy/native/install-native.sh
+```
+
+The native installer will:
+1. Verify Ubuntu 24.04 LTS, root access, internet connectivity
+2. Install Node.js 22, Python 3.12, Caddy, uv, SQLite
+3. Create dedicated service users (`openclaw`, `ocproxy`)
+4. Deploy code and build dependencies
+5. Run OpenClaw onboarding (interactive LLM authentication)
+6. Generate environment files with secrets
+7. Install systemd units and Caddyfile
+8. Configure UFW firewall
+9. Start services and verify health
+
+### Architecture (Native)
+
+```
+Caddy (:443, 0.0.0.0) → Proxy (:8080, 127.0.0.1) → OpenClaw (:3000, 127.0.0.1) → LLM APIs
+```
+
+**Key differences from Docker:**
+- Services managed by systemd instead of Docker Compose
+- Localhost binding + UFW firewall instead of Docker networks
+- systemd sandboxing (`ProtectSystem`, `NoNewPrivileges`) instead of container isolation
+- No DNS egress filtering (removed for simplicity)
+
+### Documentation
+
+- **[Native Deployment Guide](deploy/native/DEPLOYMENT.md)** — comprehensive installation, operations, troubleshooting
+- **[Docker vs Native Comparison](deploy/native/COMPARISON.md)** — detailed pros/cons analysis
+
+### Post-Installation (Native)
+
+**Check status:**
+```bash
+systemctl status openclaw openclaw-proxy caddy
+```
+
+**Run health check:**
+```bash
+/usr/local/bin/openclaw-health-check
+```
+
+**View logs:**
+```bash
+journalctl -u openclaw -f
+journalctl -u openclaw-proxy -f
+```
+
+**Test API:**
+```bash
+curl -X POST https://localhost/v1/chat/completions \
+  -H "Authorization: Bearer $(sudo grep OPENCLAW_TOKEN /etc/openclaw-secure-stack/proxy.env | cut -d= -f2)" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
 ## Configuration
 
 ### Config Files

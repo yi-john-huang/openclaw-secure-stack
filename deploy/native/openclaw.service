@@ -1,0 +1,53 @@
+[Unit]
+Description=OpenClaw AI Gateway
+After=network-online.target
+Wants=network-online.target
+Documentation=https://github.com/openclaw/openclaw
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/opt/openclaw
+EnvironmentFile=/etc/openclaw-secure-stack/openclaw.env
+Environment=HOME=/var/lib/openclaw
+Environment=NODE_ENV=production
+
+# Bind to localhost only for security (proxy is the only allowed client)
+ExecStart=/usr/bin/node dist/index.js gateway --port 3000 --bind localhost
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Security: systemd sandboxing (replaces Docker read_only, cap_drop, no-new-privileges)
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+
+# Node.js V8 JIT requires writable+executable memory for compilation
+MemoryDenyWriteExecute=no
+
+# Filesystem permissions: RW for OpenClaw data, RO for plugin code
+ReadWritePaths=/var/lib/openclaw
+ReadOnlyPaths=/opt/openclaw /opt/openclaw-secure-stack/plugins /opt/openclaw-secure-stack/config
+
+# Resource limits (2010 Mac Mini: 8GB RAM, 4 threads)
+MemoryMax=3G
+TasksMax=256
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openclaw
+
+[Install]
+WantedBy=multi-user.target
