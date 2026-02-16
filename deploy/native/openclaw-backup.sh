@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Daily backup script for OpenClaw Secure Stack
 # Install to: /etc/cron.daily/openclaw-backup (chmod +x)
-# Backs up SQLite databases and OpenClaw config to /mnt/data/backups/
+# Backs up SQLite databases and OpenClaw config to ${HDD_MOUNT}/backups/
 # Retains backups for 30 days (auto-prune).
 
 set -euo pipefail
 
-BACKUP_DIR="/mnt/data/backups"
+BACKUP_DIR="${HDD_MOUNT}/backups"
 RETENTION_DAYS=30
 DATE=$(date +%Y-%m-%d)
 BACKUP_TARGET="$BACKUP_DIR/$DATE"

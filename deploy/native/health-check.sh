@@ -80,9 +80,9 @@ echo ""
 
 # Check audit log
 echo "Audit Logging:"
-if [ -f "/mnt/data/openclaw-audit/audit.jsonl" ]; then
+if [ -f "${HDD_MOUNT}/openclaw-audit/audit.jsonl" ]; then
     pass "audit.jsonl exists"
-    lines=$(wc -l < /mnt/data/openclaw-audit/audit.jsonl)
+    lines=$(wc -l < ${HDD_MOUNT}/openclaw-audit/audit.jsonl)
     echo "  └─ $lines audit events logged"
 else
     warn "audit.jsonl does not exist (no traffic yet?)"

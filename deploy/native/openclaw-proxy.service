@@ -42,7 +42,7 @@ RestrictSUIDSGID=yes
 MemoryDenyWriteExecute=yes
 
 # Filesystem permissions: RW for DBs and audit logs, RO for config
-ReadWritePaths=/var/lib/openclaw-proxy /mnt/data/openclaw-audit
+ReadWritePaths=/var/lib/openclaw-proxy ${HDD_MOUNT}/openclaw-audit
 ReadOnlyPaths=/opt/openclaw-secure-stack/config
 
 # Resource limits (2010 Mac Mini: 8GB RAM, 4 threads)

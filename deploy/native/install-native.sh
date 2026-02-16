@@ -477,6 +477,15 @@ install_systemd_units() {
         /etc/systemd/system/
     cp /opt/openclaw-secure-stack/deploy/native/openclaw-proxy.service \
         /etc/systemd/system/
+    cp /opt/openclaw-secure-stack/deploy/native/caddy.service \
+        /etc/systemd/system/
+
+    # Template HDD_MOUNT in openclaw-proxy.service
+    sed_inplace "s|\${HDD_MOUNT}|$HDD_MOUNT|g" \
+        /etc/systemd/system/openclaw-proxy.service
+
+    # Create /etc/caddy/ directory (Caddy installed as binary, not APT)
+    mkdir -p /etc/caddy
 
     # Caddyfile
     echo ""
@@ -631,10 +640,16 @@ start_and_verify() {
     cp /opt/openclaw-secure-stack/deploy/native/openclaw-backup.sh \
         /etc/cron.daily/openclaw-backup
     chmod +x /etc/cron.daily/openclaw-backup
+    # Template HDD_MOUNT in backup script
+    sed_inplace "s|\${HDD_MOUNT}|$HDD_MOUNT|g" \
+        /etc/cron.daily/openclaw-backup
 
     cp /opt/openclaw-secure-stack/deploy/native/health-check.sh \
         /usr/local/bin/openclaw-health-check
     chmod +x /usr/local/bin/openclaw-health-check
+    # Template HDD_MOUNT in health check script
+    sed_inplace "s|\${HDD_MOUNT}|$HDD_MOUNT|g" \
+        /usr/local/bin/openclaw-health-check
 
     # Final health check
     echo ""
