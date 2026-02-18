@@ -1,10 +1,15 @@
+# Global ARG for uv image (must be before first FROM for use in FROM stages)
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.0
+
+# Named uv stage so COPY --from can reference a stage name (variable expansion not supported in --from)
+FROM ${UV_IMAGE} AS uv
+
 # Stage 1: Build dependencies with uv
 # Pin base image by digest for reproducible builds. Update digest periodically.
 # To find latest: podman pull python:3.12-slim && podman inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
-FROM python:3.12-slim@sha256:4b70b3e968be0f795f45cc2c8c159cb8034d256917573b0e8eacbc23596cd71a AS builder
+FROM python:3.12-slim AS builder
 
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.5.0
-COPY --from=${UV_IMAGE} /uv /usr/local/bin/uv
+COPY --from=uv /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./

@@ -1,0 +1,7 @@
+{
+  "id": "prompt-guard",
+  "name": "Prompt Guard",
+  "version": "1.2.0",
+  "description": "Sanitizes tool results against indirect prompt injection attacks",
+  "configSchema": {}
+}

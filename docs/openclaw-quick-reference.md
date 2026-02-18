@@ -116,8 +116,12 @@ docker compose -f /opt/openclaw-secure-stack/docker-compose.yml up -d
 
 ```bash
 # Local health checks (on server)
-curl http://127.0.0.1:3000/health  # OpenClaw Gateway (native)
-curl http://127.0.0.1:8080/health  # Proxy (Docker)
+
+# OpenClaw (native) — WebSocket server, use systemd to check health
+sudo systemctl is-active openclaw   # prints: active
+
+# Proxy (Docker) — HTTP health endpoint
+curl http://127.0.0.1:8080/health  # returns: {"status":"ok"}
 
 # Public health (from your local machine)
 curl https://yourdomain.com/health
@@ -131,6 +135,34 @@ curl -X POST https://yourdomain.com/v1/chat/completions \
   -H "Authorization: Bearer YOUR_TOKEN_HERE" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+---
+
+## Telegram Bot Setup
+
+```bash
+# 1. Create bot via @BotFather on Telegram → get token
+
+# 2. Add token to .env
+sudo nano /opt/openclaw-secure-stack/.env
+# Set: TELEGRAM_BOT_TOKEN=123456789:AAH...
+
+# 3. Restart proxy to activate webhook route
+sudo docker compose -f /opt/openclaw-secure-stack/docker-compose.yml up -d --force-recreate
+
+# 4. Register webhook URL with Telegram (⚠️ must include secret_token)
+BOT_TOKEN=$(sudo grep TELEGRAM_BOT_TOKEN /opt/openclaw-secure-stack/.env | cut -d= -f2)
+SECRET=$(echo -n "$BOT_TOKEN" | sha256sum | cut -d' ' -f1)
+curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+  -H 'Content-Type: application/json' \
+  -d "{\"url\": \"https://yourdomain.com/webhook/telegram\", \"allowed_updates\": [\"message\"], \"secret_token\": \"${SECRET}\"}"
+
+# 5. Verify
+curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo" | python3 -m json.tool
+# pending_update_count: 0, no last_error_message = working ✓
+
+# If you see 401 Unauthorized: secret_token was missing — re-run step 4
 ```
 
 ---

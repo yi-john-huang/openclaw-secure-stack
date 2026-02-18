@@ -310,6 +310,20 @@ deploy_code() {
     info "Building prompt-guard plugin..."
     npm install --omit=dev
 
+    # Create plugin manifest (required by OpenClaw for plugin discovery)
+    if [ ! -f /opt/openclaw-secure-stack/plugins/prompt-guard/openclaw.plugin.json ]; then
+        cat > /opt/openclaw-secure-stack/plugins/prompt-guard/openclaw.plugin.json <<'EOF'
+{
+  "id": "prompt-guard",
+  "name": "Prompt Guard",
+  "version": "1.2.0",
+  "description": "Sanitizes tool results against indirect prompt injection attacks",
+  "configSchema": {}
+}
+EOF
+        info "Plugin manifest created ✓"
+    fi
+
     info "Code deployed ✓"
 }
 
@@ -348,28 +362,48 @@ onboard_openclaw() {
     echo ""
     info "OAuth complete ✓"
 
-    # Configure OpenClaw
+    # Configure OpenClaw post-onboarding
+    # Notes:
+    #  - gateway.port must be 3000 (onboarding wizard may pick a different default)
+    #  - plugins must be a PluginsConfig object, NOT an array
+    #  - trustedProxies allows the Docker proxy (host network) to pass real client IPs
     info "Configuring OpenClaw..."
     sudo -u openclaw -E env HOME=/var/lib/openclaw \
         node -e "
           const fs = require('fs');
           const p = '/var/lib/openclaw/.openclaw/openclaw.json';
           const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+
+          // Enforce port 3000 (wizard may set a different default)
           c.gateway = c.gateway || {};
+          c.gateway.port = 3000;
+          c.gateway.bind = 'loopback';
+
+          // Enable HTTP chat completions endpoint
           c.gateway.http = c.gateway.http || {};
           c.gateway.http.endpoints = c.gateway.http.endpoints || {};
           c.gateway.http.endpoints.chatCompletions = { enabled: true };
+
+          // Trust the local Docker proxy (host network) for X-Forwarded-For headers
           c.gateway.trustedProxies = ['127.0.0.1/32'];
-          c.plugins = c.plugins || [];
-          if (!c.plugins.some(function(p2) { return p2.name === 'prompt-guard'; })) {
-            c.plugins.push({
-              name: 'prompt-guard',
-              path: '/opt/openclaw-secure-stack/plugins/prompt-guard',
-              enabled: true
-            });
-          }
+
+          // Register prompt-guard plugin (must be PluginsConfig object, not array)
+          c.plugins = {
+            load: { paths: ['/opt/openclaw-secure-stack/plugins/prompt-guard'] },
+            entries: { 'prompt-guard': { enabled: true } }
+          };
+
           fs.writeFileSync(p, JSON.stringify(c, null, 2));
         "
+
+    # Re-read the actual token written by the onboarding wizard — it may differ
+    # from the pre-generated value if the wizard set its own default.
+    GATEWAY_TOKEN=$(sudo -u openclaw -E env HOME=/var/lib/openclaw \
+        node -e "
+          const fs = require('fs');
+          const c = JSON.parse(fs.readFileSync('/var/lib/openclaw/.openclaw/openclaw.json', 'utf8'));
+          process.stdout.write(c.gateway.auth.token);
+        ")
 
     info "OpenClaw configured ✓"
 }
@@ -418,7 +452,7 @@ Group=openclaw
 WorkingDirectory=/opt/openclaw
 Environment="HOME=/var/lib/openclaw"
 Environment="NODE_ENV=production"
-ExecStart=/usr/bin/node /opt/openclaw/dist/index.js gateway start
+ExecStart=/usr/bin/node /opt/openclaw/dist/index.js gateway run
 Restart=on-failure
 RestartSec=5s
 StandardOutput=journal
@@ -509,10 +543,10 @@ start_and_verify() {
 
     sleep 5
 
-    # Wait for OpenClaw
+    # OpenClaw is a WebSocket server — use systemctl, not curl
     retries=0
     while [ $retries -lt 30 ]; do
-        if curl -sf http://127.0.0.1:3000/health >/dev/null 2>&1; then
+        if systemctl is-active --quiet openclaw; then
             break
         fi
         sleep 2
@@ -520,9 +554,9 @@ start_and_verify() {
     done
 
     if [ $retries -ge 30 ]; then
-        warn "OpenClaw health check timeout"
+        warn "OpenClaw did not start in time — check: journalctl -u openclaw -n 30"
     else
-        info "OpenClaw is healthy ✓"
+        info "OpenClaw is running ✓"
     fi
 
     # Wait for proxy
@@ -581,7 +615,21 @@ show_summary() {
     if [ "$USE_TUNNEL" = "true" ]; then
         info "Next Steps:"
         info "  1. Test: curl https://$DOMAIN_NAME/health"
-        info "  2. Configure Cloudflare WAF/rate limiting (optional)"
+        info ""
+        info "  To enable Telegram bot:"
+        info "  2. Create a bot via @BotFather on Telegram, copy the token"
+        info "  3. Edit .env:  sudo nano /opt/openclaw-secure-stack/.env"
+        info "     Set:  TELEGRAM_BOT_TOKEN=<your-token>"
+        info "  4. Restart proxy:"
+        info "     sudo docker compose -f /opt/openclaw-secure-stack/docker-compose.yml up -d --force-recreate"
+        info "  5. Register the webhook (run on server):"
+        info "     BOT_TOKEN=\$(sudo grep TELEGRAM_BOT_TOKEN /opt/openclaw-secure-stack/.env | cut -d= -f2)"
+        info "     SECRET=\$(echo -n \"\$BOT_TOKEN\" | sha256sum | cut -d' ' -f1)"
+        info "     curl -s -X POST \"https://api.telegram.org/bot\${BOT_TOKEN}/setWebhook\" \\"
+        info "       -H 'Content-Type: application/json' \\"
+        info "       -d \"{\\\"url\\\": \\\"https://$DOMAIN_NAME/webhook/telegram\\\", \\\"allowed_updates\\\": [\\\"message\\\"], \\\"secret_token\\\": \\\"\${SECRET}\\\"}\""
+        info ""
+        info "  See docs/openclaw-cloudflare-tunnel-setup.md for the full Telegram setup guide."
     fi
     echo ""
 }

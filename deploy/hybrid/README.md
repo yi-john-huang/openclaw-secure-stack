@@ -120,9 +120,11 @@ docker logs -f openclaw-proxy
 ### Health Checks
 
 ```bash
-# Local
-curl http://localhost:3000/health  # OpenClaw
-curl http://localhost:8080/health  # Proxy
+# OpenClaw (native) — WebSocket server, check via systemd
+sudo systemctl is-active openclaw   # prints: active
+
+# Proxy (Docker) — HTTP health endpoint
+curl http://localhost:8080/health   # returns: {"status":"ok"}
 
 # Public (if tunnel enabled)
 curl https://yourdomain.com/health
@@ -133,6 +135,40 @@ curl https://yourdomain.com/health
 ```bash
 sudo grep OPENCLAW_TOKEN /opt/openclaw-secure-stack/.env | cut -d= -f2
 ```
+
+### Telegram Bot Setup
+
+After installation, connect a Telegram bot in four steps:
+
+**1. Create a bot** — talk to @BotFather on Telegram, send `/newbot`, copy the token.
+
+**2. Set the token in .env:**
+```bash
+sudo nano /opt/openclaw-secure-stack/.env
+# Set: TELEGRAM_BOT_TOKEN=123456789:AAH...
+```
+
+**3. Restart the proxy:**
+```bash
+sudo docker compose -f /opt/openclaw-secure-stack/docker-compose.yml up -d --force-recreate
+```
+
+**4. Register the webhook with Telegram** — this step is required and must include the `secret_token`, otherwise every message returns 401:
+```bash
+BOT_TOKEN=$(sudo grep TELEGRAM_BOT_TOKEN /opt/openclaw-secure-stack/.env | cut -d= -f2)
+SECRET=$(echo -n "$BOT_TOKEN" | sha256sum | cut -d' ' -f1)
+
+curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+  -H 'Content-Type: application/json' \
+  -d "{\"url\": \"https://yourdomain.com/webhook/telegram\", \"allowed_updates\": [\"message\"], \"secret_token\": \"${SECRET}\"}"
+```
+
+Verify: `pending_update_count: 0` and no `last_error_message` in:
+```bash
+curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo" | python3 -m json.tool
+```
+
+> See the full guide for troubleshooting: `docs/openclaw-cloudflare-tunnel-setup.md` Part 7
 
 ## Troubleshooting
 
