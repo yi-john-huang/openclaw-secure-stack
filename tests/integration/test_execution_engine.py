@@ -784,7 +784,7 @@ class TestExecutor:
 
         assert isinstance(result, dict)
         assert result["type"] == "agent_plan"
-        assert result["planId"] == "plan-123"
+        assert result["plan_id"] == "plan-123"
         assert "agentContext" in result
         assert "Agent guided test" in result["agentContext"]
 

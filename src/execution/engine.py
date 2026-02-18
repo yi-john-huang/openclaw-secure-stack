@@ -125,6 +125,7 @@ class ExecutionEngine:
         """
 
         plan.state.status = StepStatus.RUNNING
+        plan.state.started_at = datetime.now(UTC).isoformat()
 
         try:
             # Execute each action

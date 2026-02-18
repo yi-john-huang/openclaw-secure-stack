@@ -93,7 +93,6 @@ class PlanGenerator:
 
         Args:
             patterns_path: Path to the intent-patterns.json config file.
-            llm: Optional LLM client for plan enhancement.
             schema_path: Path to execution-plan.json schema file.
         """
         self._patterns_path = patterns_path

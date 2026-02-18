@@ -851,15 +851,11 @@ class TestPlanGeneratorIntegration:
 # --- Middleware create_enhanced_plan Tests ---
 
 
+# --- Middleware create_enhanced_plan Tests ---
+
+
 class TestMiddlewareCreateEnhancedPlan:
     """Tests for GovernanceMiddleware.create_enhanced_plan()."""
-
-    @pytest.fixture
-    def mock_planner(self):
-        """Create a mock planner."""
-        planner = MagicMock()
-        planner.enhance = MagicMock()
-        return planner
 
     @pytest.fixture
     def sample_base_plan(self) -> ExecutionPlan:
@@ -888,22 +884,24 @@ class TestMiddlewareCreateEnhancedPlan:
     @pytest.fixture
     def mock_enhanced_plan(self, sample_base_plan):
         """Create a mock enhanced plan returned by planner."""
-        enhanced = MagicMock(spec=EnhancedExecutionPlan)
-        enhanced.base_plan = sample_base_plan
-        enhanced.plan_id = "plan-123"
-        enhanced.initialize_state = MagicMock()
-        return enhanced
+        return EnhancedExecutionPlan(
+            base_plan=sample_base_plan,
+            description="Test enhanced plan",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
 
-    def test_create_enhanced_plan_calls_planner_enhance(
-        self,
-        tmp_path,
-        sample_base_plan,
-        mock_enhanced_plan,
-    ):
-        """Test that create_enhanced_plan calls planner.enhance()."""
+    @pytest.fixture
+    def middleware_with_enhancement(self, tmp_path):
+        """Create middleware with enhancement enabled."""
         from src.governance.middleware import GovernanceMiddleware
 
-        # Create config files
         patterns_path = tmp_path / "patterns.json"
         patterns_path.write_text('{"tool_categories": {}, "argument_patterns": {}, "risk_multipliers": {}}')
 
@@ -914,10 +912,13 @@ class TestMiddlewareCreateEnhancedPlan:
 
         settings = {
             "enabled": True,
-            "enhancement": {"enabled": True},
+            "enhancement": {
+                "enabled": True,
+                "default_context": {"environment": "test", "user_role": "tester"},
+            },
         }
 
-        middleware = GovernanceMiddleware(
+        return GovernanceMiddleware(
             db_path=db_path,
             secret="test-secret",
             policy_path=str(policy_path),
@@ -925,123 +926,122 @@ class TestMiddlewareCreateEnhancedPlan:
             settings=settings,
         )
 
-        # Replace planner with mock
-        mock_planner = MagicMock()
-        mock_planner.enhance = MagicMock(return_value=mock_enhanced_plan)
-        middleware._planner = mock_planner
+    def test_create_enhanced_plan_returns_enhanced_plan(
+        self,
+        middleware_with_enhancement,
+        sample_base_plan,
+        mock_enhanced_plan,
+    ):
+        """Test that create_enhanced_plan returns EnhancedExecutionPlan."""
+        # Mock the planner.enhance method
+        middleware_with_enhancement._planner.enhance = MagicMock(return_value=mock_enhanced_plan)
 
-        # Call create_enhanced_plan
-        middleware.create_enhanced_plan(
+        result = middleware_with_enhancement.create_enhanced_plan(
             basic_plan=sample_base_plan,
             session_id="session-456",
             user_id="user-123",
             token="token-abc",
         )
 
-        # Verify planner.enhance was called
-        mock_planner.enhance.assert_called_once()
+        assert result is not None
+        assert isinstance(result, EnhancedExecutionPlan)
+        assert result.description == "Test enhanced plan"
 
     def test_create_enhanced_plan_initializes_state(
         self,
-        tmp_path,
+        middleware_with_enhancement,
         sample_base_plan,
         mock_enhanced_plan,
     ):
-        """Test that create_enhanced_plan initializes state on enhanced plan."""
-        from src.governance.middleware import GovernanceMiddleware
+        """Test that create_enhanced_plan initializes state correctly."""
+        middleware_with_enhancement._planner.enhance = MagicMock(return_value=mock_enhanced_plan)
 
-        patterns_path = tmp_path / "patterns.json"
-        patterns_path.write_text('{"tool_categories": {}, "argument_patterns": {}, "risk_multipliers": {}}')
-
-        policy_path = tmp_path / "policies.json"
-        policy_path.write_text("[]")
-
-        db_path = str(tmp_path / "test.db")
-
-        settings = {
-            "enabled": True,
-            "enhancement": {"enabled": True},
-        }
-
-        middleware = GovernanceMiddleware(
-            db_path=db_path,
-            secret="test-secret",
-            policy_path=str(policy_path),
-            patterns_path=str(patterns_path),
-            settings=settings,
-        )
-
-        # Replace planner with mock
-        mock_planner = MagicMock()
-        mock_planner.enhance = MagicMock(return_value=mock_enhanced_plan)
-        middleware._planner = mock_planner
-
-        middleware.create_enhanced_plan(
+        result = middleware_with_enhancement.create_enhanced_plan(
             basic_plan=sample_base_plan,
             session_id="session-456",
             user_id="user-123",
             token="token-abc",
         )
 
-        # Verify initialize_state was called with correct args
-        mock_enhanced_plan.initialize_state.assert_called_once_with(
-            session_id="session-456",
-            user_id="user-123",
-            token="token-abc",
-        )
+        assert result.state is not None
+        assert result.state.context.session_id == "session-456"
+        assert result.state.context.user_id == "user-123"
+        assert result.state.context.token == "token-abc"
 
-    def test_create_enhanced_plan_passes_context(
+    def test_create_enhanced_plan_passes_enhancement_context(
         self,
-        tmp_path,
+        middleware_with_enhancement,
         sample_base_plan,
         mock_enhanced_plan,
     ):
-        """Test that create_enhanced_plan passes context to planner."""
-        from src.governance.middleware import GovernanceMiddleware
+        """Test that create_enhanced_plan passes context from settings."""
+        middleware_with_enhancement._planner.enhance = MagicMock(return_value=mock_enhanced_plan)
 
-        patterns_path = tmp_path / "patterns.json"
-        patterns_path.write_text('{"tool_categories": {}, "argument_patterns": {}, "risk_multipliers": {}}')
-
-        policy_path = tmp_path / "policies.json"
-        policy_path.write_text("[]")
-
-        db_path = str(tmp_path / "test.db")
-
-        settings = {
-            "enabled": True,
-            "enhancement": {"enabled": True},
-        }
-
-        middleware = GovernanceMiddleware(
-            db_path=db_path,
-            secret="test-secret",
-            policy_path=str(policy_path),
-            patterns_path=str(patterns_path),
-            settings=settings,
-        )
-
-        mock_planner = MagicMock()
-        mock_planner.enhance = MagicMock(return_value=mock_enhanced_plan)
-        middleware._planner = mock_planner
-
-        middleware.create_enhanced_plan(
+        middleware_with_enhancement.create_enhanced_plan(
             basic_plan=sample_base_plan,
             session_id="session-456",
             user_id="user-123",
             token="token-abc",
         )
 
-        # Check that context was passed (current impl passes {"user_role": "admin"})
-        call_args = mock_planner.enhance.call_args
-        # Note: Current middleware has a bug - it passes context as positional arg
-        # where llm should be. This test documents current behavior.
-        assert call_args is not None
+        # Check that enhance was called with the context from settings
+        call_kwargs = middleware_with_enhancement._planner.enhance.call_args.kwargs
+        assert call_kwargs["context"] == {"environment": "test", "user_role": "tester"}
 
-    def test_enhancement_disabled_skips_create_enhanced_plan(
+    def test_create_enhanced_plan_lazy_loads_llm(
         self,
-        tmp_path,
+        middleware_with_enhancement,
+        sample_base_plan,
+        mock_enhanced_plan,
     ):
-        """Test that enhancement is skipped when disabled."""
+        """Test that LLM client is lazy-loaded on first call."""
+        middleware_with_enhancement._planner.enhance = MagicMock(return_value=mock_enhanced_plan)
+
+        # Initially None
+        assert middleware_with_enhancement._llm is None
+
+        middleware_with_enhancement.create_enhanced_plan(
+            basic_plan=sample_base_plan,
+            session_id="session-456",
+            user_id="user-123",
+            token="token-abc",
+        )
+
+        # After call, LLM should be created
+        assert middleware_with_enhancement._llm is not None
+
+    def test_create_enhanced_plan_reuses_llm(
+        self,
+        middleware_with_enhancement,
+        sample_base_plan,
+        mock_enhanced_plan,
+    ):
+        """Test that LLM client is reused across calls."""
+        middleware_with_enhancement._planner.enhance = MagicMock(return_value=mock_enhanced_plan)
+
+        # First call
+        middleware_with_enhancement.create_enhanced_plan(
+            basic_plan=sample_base_plan,
+            session_id="session-1",
+            user_id="user-1",
+            token="token-1",
+        )
+        first_llm = middleware_with_enhancement._llm
+
+        # Second call
+        middleware_with_enhancement.create_enhanced_plan(
+            basic_plan=sample_base_plan,
+            session_id="session-2",
+            user_id="user-2",
+            token="token-2",
+        )
+        second_llm = middleware_with_enhancement._llm
+
+        # Should be same instance
+        assert first_llm is second_llm
+
+    def test_enhancement_disabled_by_default(self, tmp_path):
+        """Test that enhancement is disabled by default."""
         from src.governance.middleware import GovernanceMiddleware
 
         patterns_path = tmp_path / "patterns.json"
@@ -1052,10 +1052,7 @@ class TestMiddlewareCreateEnhancedPlan:
 
         db_path = str(tmp_path / "test.db")
 
-        settings = {
-            "enabled": True,
-            "enhancement": {"enabled": False},  # Disabled
-        }
+        settings = {"enabled": True}  # No enhancement settings
 
         middleware = GovernanceMiddleware(
             db_path=db_path,

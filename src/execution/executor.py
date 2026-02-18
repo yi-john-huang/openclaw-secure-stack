@@ -66,19 +66,12 @@ class Executor:
         # Initialize state
         # AGENT MODE
         if plan.execution_mode == ExecutionMode.AGENT_GUIDED:
-            injector = AgentContextInjector()
             return {
                 "type": "agent_plan",
-                "planId": plan.plan_id,
-                "agentContext": injector.generate_context(plan),
+                "plan_id": plan.plan_id,
+                "agentContext": self._injector.generate_context(plan),
             }
 
-        # ENGINE MODE
-        engine = ExecutionEngine(
-            enforcer=self._enforcer,
-            tool_executor=self._tool_executor,
-        )
-
-        await engine.execute(
+        await self._engine.execute(
             plan=plan
         )

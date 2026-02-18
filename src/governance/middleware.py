@@ -23,7 +23,7 @@ from src.governance.models import (
     GovernanceDecision,
     PolicyViolation,
     ToolCall,
-    ExecutionPlan,
+    ExecutionPlan, EnhancedExecutionPlan,
 )
 from src.governance.planner import PlanGenerator
 from src.governance.session import SessionManager
@@ -113,6 +113,13 @@ class GovernanceMiddleware:
             enhancement_settings = settings.get("enhancement", {})
             self._enhancement_enabled = enhancement_settings.get("enabled", False)
             self._enhancement_context = enhancement_settings.get("default_context", {})
+            self._llm: LLMClient | None = None
+
+    def _get_llm(self) -> LLMClient:
+        """Lazy-load LLM client on first use."""
+        if self._llm is None:
+            self._llm = LLMClient()
+        return self._llm
 
     def evaluate(
         self,
@@ -225,12 +232,12 @@ class GovernanceMiddleware:
             session_id: str | None,
             user_id: str,
             token: str,
-    ):
+    ) -> EnhancedExecutionPlan | None:
         # Enhance with LLM
         enhanced_plan = self._planner.enhance(
             basic_plan,
-            LLMClient(),
-            context={"user_role": "admin"},
+            llm=self._get_llm(),
+            context=self._enhancement_context,
         )
 
         enhanced_plan.initialize_state(
@@ -238,6 +245,8 @@ class GovernanceMiddleware:
             user_id=user_id,
             token=token,
         )
+
+        return enhanced_plan
 
     def enforce(
         self,
