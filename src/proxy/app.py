@@ -331,6 +331,7 @@ def _register_webhook_routes(
     if not telegram_bot_token and not whatsapp_config:
         return registered_paths
 
+    from src.webhook.history import ConversationHistory
     from src.webhook.rate_limiter import WebhookRateLimiter
     from src.webhook.relay import WebhookRelayPipeline
     from src.webhook.replay_protection import ReplayProtection
@@ -348,6 +349,7 @@ def _register_webhook_routes(
         governance=governance,
         response_scanner=response_scanner,
         audit_logger=audit_logger,
+        conversation_history=ConversationHistory(),
     )
 
     if telegram_bot_token:

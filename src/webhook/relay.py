@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from src.governance.middleware import GovernanceMiddleware
     from src.quarantine.manager import QuarantineManager
     from src.sanitizer.sanitizer import PromptSanitizer
+    from src.webhook.history import ConversationHistory
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class WebhookRelayPipeline:
         governance: GovernanceMiddleware | None = None,
         response_scanner: PromptSanitizer | None = None,
         audit_logger: AuditLogger | None = None,
+        conversation_history: ConversationHistory | None = None,
     ) -> None:
         self._sanitizer = sanitizer
         self._quarantine = quarantine_manager
@@ -59,6 +61,7 @@ class WebhookRelayPipeline:
         self._upstream_token = upstream_token
         self._response_scanner = response_scanner
         self._audit = audit_logger
+        self._history = conversation_history
 
     async def relay(self, message: WebhookMessage) -> WebhookResponse:
         """Run the full relay pipeline for a webhook message."""
@@ -124,13 +127,23 @@ class WebhookRelayPipeline:
                     status_code=403,
                 )
 
-        # Stage 4: Forward to upstream
+        # Stage 4: Build messages with conversation history and forward to upstream
+        if self._history:
+            self._history.append_user(message.sender_id, clean_text)
+            messages: list[dict[str, str]] = self._history.get(message.sender_id)
+        else:
+            messages = [{"role": "user", "content": clean_text}]
+
         request_body = {
             "model": "default",
-            "messages": [{"role": "user", "content": clean_text}],
+            "messages": messages,
             "metadata": {"source": message.source, **message.metadata},
         }
         upstream_response = await self._forward_to_upstream(request_body)
+
+        # Update history with assistant reply (only on success)
+        if self._history and upstream_response.status_code == 200:
+            self._history.append_assistant(message.sender_id, upstream_response.text)
 
         # Stage 5: Response scan (indirect injection)
         if self._response_scanner and upstream_response.status_code == 200:
