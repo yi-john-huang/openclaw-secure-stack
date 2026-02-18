@@ -1,0 +1,53 @@
+# Hybrid Deployment: Native OpenClaw + Containerized Proxy
+# Used by deploy/hybrid/install-hybrid.sh
+
+version: '3.8'
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openclaw-proxy
+    restart: unless-stopped
+
+    # Use host network to reach native OpenClaw on localhost:3000
+    network_mode: host
+
+    environment:
+      # Point to native OpenClaw
+      - UPSTREAM_URL=http://127.0.0.1:3000
+      - OPENCLAW_TOKEN=${OPENCLAW_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOVERNANCE_ENABLED=true
+      - GOVERNANCE_SECRET=${GOVERNANCE_SECRET}
+      - GOVERNANCE_APPROVAL_TIMEOUT=3600
+      - GOVERNANCE_ALLOW_SELF_APPROVAL=true
+      - WEBHOOK_RATE_LIMIT=60
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET:-}
+      - WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN:-}
+      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID:-}
+      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN:-}
+
+    volumes:
+      # Mount config files
+      - ./config:/app/config:ro
+
+      # Mount data directories (sync with native paths)
+      - /var/lib/openclaw-proxy:/app/data
+      - /home/openclaw-data/openclaw-audit:/app/audit
+
+    user: "65534:65534"  # nobody user
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m

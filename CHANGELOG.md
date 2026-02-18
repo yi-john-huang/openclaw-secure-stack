@@ -5,24 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-02-18
+
+### Added
+- **Hybrid deployment architecture (primary deployment method)** — combines native OpenClaw with containerized proxy
+  - One-click installer (`deploy/hybrid/install-hybrid.sh`) with integrated Cloudflare Tunnel setup
+  - Native OpenClaw (systemd) for better OAuth and plugin support
+  - Docker proxy container for security isolation and easy updates
+  - Stable release strategy (Git tags instead of main branch) to avoid TypeScript compilation errors
+  - Interactive prompts for domain configuration and Cloudflare Tunnel
+  - Automated pnpm installation and OpenClaw monorepo build
+  - Health check verification for both services
+  - Docker Compose configuration (`deploy/hybrid/docker-compose.hybrid.yml`)
+  - Comprehensive documentation (`deploy/hybrid/README.md`)
+
+### Changed
+- **Simplified deployment options** — hybrid architecture is now the recommended and only supported production deployment method
+- **Documentation updated** — all guides now reference hybrid deployment instead of native
+  - Updated `docs/openclaw-cloudflare-tunnel-setup.md` with hybrid installer usage
+  - Updated `docs/openclaw-quick-reference.md` with hybrid service management
+  - Updated main `README.md` to promote hybrid as primary deployment
+
+### Removed
+- **Native deployment** (`deploy/native/`) — superseded by hybrid architecture
+  - Fully-native deployment was more complex and had more failure points
+  - Hybrid approach provides better balance of native benefits and containerization
+  - Reduces maintenance burden of supporting multiple deployment methods
+
 ## [1.3.0] - 2026-02-17
 
 ### Added
-- **Native deployment for Ubuntu 24.04 LTS** — systemd-based alternative to Docker Compose
-  - Interactive shell installer (`deploy/native/install-native.sh`) with configuration prompts
-  - systemd service units with security hardening (`ProtectSystem=strict`, dropped capabilities)
-  - Caddy reverse proxy with automatic HTTPS (domain or localhost self-signed)
-  - Health check script (`health-check.sh`) for monitoring service status
-  - Automated daily backup script (`openclaw-backup.sh`) with 30-day retention
-  - Comprehensive deployment guide (`deploy/native/DEPLOYMENT.md`)
-  - Docker vs native comparison analysis (`deploy/native/COMPARISON.md`)
-  - Uninstaller script for clean removal
+- ~~**Native deployment for Ubuntu 24.04 LTS**~~ (deprecated in 1.4.0, use hybrid instead)
 
 ### Fixed
-- **Native installer critical bugs** — 3 issues discovered in code review
-  - Missing `/etc/caddy/` directory creation (installer crash)
-  - Missing `caddy.service` systemd unit (service enable failure)
-  - Hardcoded `/mnt/data` paths ignoring configurable `HDD_MOUNT` (silent data loss)
+- ~~**Native installer critical bugs**~~ (moot - native deployment removed in 1.4.0)
 
 ## [1.2.0] - 2026-02-07
 
