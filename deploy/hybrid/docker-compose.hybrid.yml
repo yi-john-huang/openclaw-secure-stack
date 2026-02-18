@@ -6,7 +6,7 @@ version: '3.8'
 services:
   proxy:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
     container_name: openclaw-proxy
     restart: unless-stopped
@@ -34,7 +34,7 @@ services:
 
     volumes:
       # Mount config files
-      - ./config:/app/config:ro
+      - ../../config:/app/config:ro
 
       # Mount data directories (sync with native paths)
       # Note: /home/openclaw-data is the default HDD_MOUNT path
