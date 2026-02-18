@@ -445,7 +445,7 @@ deploy_docker_proxy() {
 
     # Copy hybrid docker-compose
     cp "$(dirname "$0")/docker-compose.hybrid.yml" docker-compose.yml 2>/dev/null || \
-        cat > docker-compose.yml <<'EOF'
+        cat > docker-compose.yml <<EOF
 version: '3.8'
 
 services:
@@ -458,13 +458,13 @@ services:
     network_mode: host
     environment:
       - UPSTREAM_URL=http://127.0.0.1:3000
-      - OPENCLAW_TOKEN=${OPENCLAW_TOKEN}
+      - OPENCLAW_TOKEN=\${OPENCLAW_TOKEN}
       - GOVERNANCE_ENABLED=true
-      - GOVERNANCE_SECRET=${GOVERNANCE_SECRET}
+      - GOVERNANCE_SECRET=\${GOVERNANCE_SECRET}
     volumes:
       - ./config:/app/config:ro
       - /var/lib/openclaw-proxy:/app/data
-      - /home/openclaw-data/openclaw-audit:/app/audit
+      - $HDD_MOUNT/openclaw-audit:/app/audit
     user: "65534:65534"
     security_opt:
       - no-new-privileges:true
