@@ -495,17 +495,22 @@ sudo lsof -i :3000  # Check if port in use
 - pnpm dependencies not installed
 - Missing OAuth credentials in `/var/lib/openclaw/.openclaw/openclaw.json`
 
-### Expected Startup Warnings (Non-Fatal)
+### Expected Startup Warnings
 
-These two log lines appear on every startup and are **harmless** — do not indicate a problem:
+These two log lines appear on every startup:
 
 ```
 [prompt-guard] Failed to load rules from .../indirect-injection-rules.json
 [gateway] [plugins] prompt-guard missing register/activate export
 ```
 
-- The first warning means the plugin is logging that its rules file path uses a different resolution than expected. The proxy handles rule enforcement independently.
-- The second warning means the plugin uses hook declarations (via `package.json`) rather than the `register()`/`activate()` export style. OpenClaw loads it anyway via the hooks system.
+**What they mean:**
+
+- **`Failed to load rules`** — The prompt-guard TypeScript module loaded successfully, but its rules file path could not be resolved relative to OpenClaw's working directory. This means the `tool_result_persist` hook's injection pattern scanning has no rules to apply if the hook were active.
+
+- **`missing register/activate export`** — OpenClaw's plugin loader requires a named `register()` or `activate()` export to wire up hooks. The prompt-guard plugin uses `export default { hooks: { before_tool_call, tool_result_persist } }`, which OpenClaw does **not** recognize. As a result, **the `before_tool_call` and `tool_result_persist` hooks are not active** in OpenClaw's native hook system.
+
+**Security posture:** These warnings mean prompt-guard does not add a hook layer inside OpenClaw. The **Python proxy layer is the primary enforcement path** — the governance middleware, content sanitizer, and rate limiter operate on every request before it reaches OpenClaw, providing equivalent protection independently of this plugin.
 
 ### Proxy Not Starting
 

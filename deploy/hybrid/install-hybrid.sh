@@ -538,12 +538,10 @@ start_and_verify() {
     info "Starting OpenClaw..."
     systemctl start openclaw
 
-    sleep 5
-
-    # OpenClaw is a WebSocket server — use systemctl, not curl
+    # Wait for OpenClaw to actually bind to port 3000 (process liveness ≠ readiness)
     retries=0
     while [ $retries -lt 30 ]; do
-        if systemctl is-active --quiet openclaw; then
+        if ss -tlnp 2>/dev/null | grep -q ':3000 '; then
             break
         fi
         sleep 2
@@ -551,12 +549,12 @@ start_and_verify() {
     done
 
     if [ $retries -ge 30 ]; then
-        warn "OpenClaw did not start in time — check: journalctl -u openclaw -n 30"
+        warn "OpenClaw did not bind to port 3000 in time — check: journalctl -u openclaw -n 30"
     else
-        info "OpenClaw is running ✓"
+        info "OpenClaw is listening on :3000 ✓"
     fi
 
-    # Wait for proxy
+    # Wait for proxy HTTP endpoint
     retries=0
     while [ $retries -lt 30 ]; do
         if curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then
@@ -569,7 +567,27 @@ start_and_verify() {
     if [ $retries -ge 30 ]; then
         warn "Proxy health check timeout"
     else
-        info "Proxy is healthy ✓"
+        info "Proxy is listening on :8080 ✓"
+    fi
+
+    # End-to-end connectivity: send a request through the proxy to OpenClaw.
+    # A 502/503 means the proxy cannot reach OpenClaw; any other status confirms the path.
+    TOKEN=$(grep '^OPENCLAW_TOKEN=' /opt/openclaw-secure-stack/.env 2>/dev/null | cut -d= -f2-)
+    if [ -n "$TOKEN" ]; then
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://127.0.0.1:8080/v1/chat/completions \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}],"max_tokens":1}' \
+            2>/dev/null || echo "000")
+        if [ "$HTTP_STATUS" = "502" ] || [ "$HTTP_STATUS" = "503" ] || [ "$HTTP_STATUS" = "000" ]; then
+            warn "End-to-end test failed (HTTP $HTTP_STATUS) — proxy cannot reach OpenClaw"
+            warn "Debug: journalctl -u openclaw -n 30 | ss -tlnp | grep 3000"
+        else
+            info "End-to-end proxy → OpenClaw connectivity confirmed (HTTP $HTTP_STATUS) ✓"
+        fi
+    else
+        warn "Could not read OPENCLAW_TOKEN from .env — skipping end-to-end test"
     fi
 }
 
