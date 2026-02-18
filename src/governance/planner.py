@@ -27,6 +27,7 @@ from src.governance.models import (
     RiskLevel,
     ToolCall, ExecutionMode, RecoveryPath, ConditionalBranch, RecoveryStrategy, EnhancedExecutionPlan,
 )
+from src.llm.client import LLMClient
 
 ENHANCE_PLAN_PROMPT = """You are enhancing an execution plan with operational knowledge.
 
@@ -86,7 +87,6 @@ class PlanGenerator:
     def __init__(
         self,
         patterns_path: str,
-        llm=None,
         schema_path: str = "config/execution-plan.json"
     ) -> None:
         """Initialize the plan generator.
@@ -103,7 +103,6 @@ class PlanGenerator:
         self._schema: dict[str, Any] | None = None
         self._load_config()
         self._load_schema()
-        self._llm = llm
 
     def generate(
             self,
@@ -145,6 +144,7 @@ class PlanGenerator:
     def enhance(
             self,
             plan: ExecutionPlan,
+            llm: LLMClient,
             context: dict[str, Any] | None = None,
     ) -> EnhancedExecutionPlan:
         """Enhance a base plan with LLM-generated operational knowledge.
@@ -155,6 +155,7 @@ class PlanGenerator:
         Args:
             plan: The base execution plan to enhance.
             context: Optional user/operational context for the LLM.
+            llm: LLM call through proxy
 
         Returns:
             EnhancedExecutionPlan wrapping the base plan with enhancements.
@@ -163,7 +164,7 @@ class PlanGenerator:
             RuntimeError: If no LLM client configured or schema not found.
             ValueError: If LLM returns invalid JSON.
         """
-        if self._llm is None:
+        if llm is None:
             raise RuntimeError("No LLM client configured for plan enhancement")
 
         if self._schema is None:
@@ -187,7 +188,7 @@ class PlanGenerator:
         )
 
         # Call LLM
-        raw = self._llm.complete(prompt=prompt, temperature=0)
+        raw = llm.complete(prompt=prompt, temperature=0)
 
         # Parse response
         enhanced_dict = self._parse_llm_response(raw)

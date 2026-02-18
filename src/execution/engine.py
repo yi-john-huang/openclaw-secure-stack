@@ -123,6 +123,9 @@ class ExecutionEngine:
         Returns:
             Final ExecutionState with all results.
         """
+
+        plan.state.status = StepStatus.RUNNING
+
         try:
             # Execute each action
             for action in plan.actions:
@@ -343,73 +346,6 @@ class ExecutionEngine:
         start = datetime.fromisoformat(started_at)
         end = datetime.fromisoformat(completed_at)
         return int((end - start).total_seconds() * 1000)
-
-
-class AgentContextInjector:
-    """Injects plan into LLM agent context for agent-guided execution.
-    
-    When execution mode is AGENT_GUIDED, this class generates
-    the context/prompt that should be injected into the LLM's
-    conversation to guide it through the plan.
-    """
-    
-    def generate_context(
-        self,
-        plan: EnhancedExecutionPlan
-    ) -> str:
-        """Generate context string to inject into agent.
-        
-        Args:
-            plan: The execution plan.
-            state: Current execution state.
-            
-        Returns:
-            String to inject into agent context.
-        """
-        lines = [
-            "## Execution Plan",
-            "",
-            f"Plan ID: {plan.plan_id}",
-            f"Description: {plan.description or 'N/A'}",
-            "",
-            "### Constraints (MUST follow)",
-        ]
-        
-        for constraint in plan.constraints:
-            lines.append(f"- {constraint}")
-        
-        if not plan.constraints:
-            lines.append("- None specified")
-        
-        lines.extend([
-            "",
-            "### Steps to Execute",
-        ])
-        
-        for action in plan.actions:
-            status_marker = ""
-            if action.sequence < plan.state.current_sequence:
-                result = plan.state.step_results[action.sequence]
-                status_marker = f" [{result.status.value}]"
-            elif action.sequence == plan.state.current_sequence:
-                status_marker = " [CURRENT]"
-            
-            lines.append(
-                f"{action.sequence + 1}. {action.tool_call.name}"
-                f"({', '.join(f'{k}={v}' for k, v in action.tool_call.arguments.items())})"
-                f"{status_marker}"
-            )
-        
-        lines.extend([
-            "",
-            "### Rules",
-            "- Execute steps in order",
-            "- Do not skip steps unless instructed",
-            "- Report any errors immediately",
-            "- Do not deviate from the plan without approval",
-        ])
-        
-        return "\n".join(lines)
 
     def _calc_total_duration(self, plan: EnhancedExecutionPlan) -> str:
         """Calculate total execution duration as human-readable string."""

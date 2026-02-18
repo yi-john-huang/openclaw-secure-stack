@@ -65,7 +65,7 @@ class Executor:
         """
         # Initialize state
         # AGENT MODE
-        if plan.execution_mode == "agent":
+        if plan.execution_mode == ExecutionMode.AGENT_GUIDED:
             injector = AgentContextInjector()
             return {
                 "type": "agent_plan",

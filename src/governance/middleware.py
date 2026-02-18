@@ -85,9 +85,8 @@ class GovernanceMiddleware:
         self._enabled = settings.get("enabled", True)
 
         if self._enabled:
-            self.llm = LLMClient()
             self._classifier = IntentClassifier(patterns_path)
-            self._planner = PlanGenerator(patterns_path, self.llm)
+            self._planner = PlanGenerator(patterns_path)
             self._validator = PolicyValidator(policy_path)
             self._store = PlanStore(db_path, secret)
             self._enforcer = GovernanceEnforcer(db_path, secret)
@@ -109,6 +108,11 @@ class GovernanceMiddleware:
             enforcement_settings = settings.get("enforcement", {})
             self._enforcement_enabled = enforcement_settings.get("enabled", True)
             self._token_ttl = enforcement_settings.get("token_ttl_seconds", 900)
+
+            # Enhancement settings
+            enhancement_settings = settings.get("enhancement", {})
+            self._enhancement_enabled = enhancement_settings.get("enabled", False)
+            self._enhancement_context = enhancement_settings.get("default_context", {})
 
     def evaluate(
         self,
@@ -191,8 +195,10 @@ class GovernanceMiddleware:
         # Store plan and issue token
         plan_id, token = self._store.store(plan, ttl_seconds=self._token_ttl)
 
-        # Create enhanceed plan
-        self.create_enhanced_plan(plan, effective_session_id, user_id, token)
+        # Optionally create enhanced plan
+        if self._enhancement_enabled:
+            # Create enhanceed plan
+            self.create_enhanced_plan(plan, effective_session_id, user_id, token)
 
         # Record in session if enabled
         if self._session_enabled:
@@ -223,7 +229,8 @@ class GovernanceMiddleware:
         # Enhance with LLM
         enhanced_plan = self._planner.enhance(
             basic_plan,
-            context={"user_role": "admin"}
+            LLMClient(),
+            context={"user_role": "admin"},
         )
 
         enhanced_plan.initialize_state(
