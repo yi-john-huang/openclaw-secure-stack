@@ -25,7 +25,6 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
-uv.lock
 
 # Node.js / TypeScript
 node_modules/
