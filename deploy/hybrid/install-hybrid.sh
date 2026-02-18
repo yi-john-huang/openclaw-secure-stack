@@ -310,20 +310,6 @@ deploy_code() {
     info "Building prompt-guard plugin..."
     npm install --omit=dev
 
-    # Create plugin manifest (required by OpenClaw for plugin discovery)
-    if [ ! -f /opt/openclaw-secure-stack/plugins/prompt-guard/openclaw.plugin.json ]; then
-        cat > /opt/openclaw-secure-stack/plugins/prompt-guard/openclaw.plugin.json <<'EOF'
-{
-  "id": "prompt-guard",
-  "name": "Prompt Guard",
-  "version": "1.2.0",
-  "description": "Sanitizes tool results against indirect prompt injection attacks",
-  "configSchema": {}
-}
-EOF
-        info "Plugin manifest created ✓"
-    fi
-
     info "Code deployed ✓"
 }
 
@@ -490,7 +476,8 @@ deploy_docker_proxy() {
             sed -i "s|/home/openclaw-data/openclaw-audit|$HDD_MOUNT/openclaw-audit|g" docker-compose.yml
         fi
     else
-        # Fallback: generate inline docker-compose with user's HDD path
+        # Fallback: generate inline docker-compose with user's HDD path.
+        # Keep in sync with deploy/hybrid/docker-compose.hybrid.yml.
         cat > docker-compose.yml <<EOF
 version: '3.8'
 
@@ -505,8 +492,18 @@ services:
     environment:
       - UPSTREAM_URL=http://127.0.0.1:3000
       - OPENCLAW_TOKEN=\${OPENCLAW_TOKEN}
+      - OPENAI_API_KEY=\${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=\${ANTHROPIC_API_KEY:-}
       - GOVERNANCE_ENABLED=true
       - GOVERNANCE_SECRET=\${GOVERNANCE_SECRET}
+      - GOVERNANCE_APPROVAL_TIMEOUT=3600
+      - GOVERNANCE_ALLOW_SELF_APPROVAL=true
+      - WEBHOOK_RATE_LIMIT=60
+      - TELEGRAM_BOT_TOKEN=\${TELEGRAM_BOT_TOKEN:-}
+      - WHATSAPP_APP_SECRET=\${WHATSAPP_APP_SECRET:-}
+      - WHATSAPP_VERIFY_TOKEN=\${WHATSAPP_VERIFY_TOKEN:-}
+      - WHATSAPP_PHONE_NUMBER_ID=\${WHATSAPP_PHONE_NUMBER_ID:-}
+      - WHATSAPP_ACCESS_TOKEN=\${WHATSAPP_ACCESS_TOKEN:-}
       - AUDIT_LOG_PATH=/app/audit/audit.jsonl
     volumes:
       - ./config:/app/config:ro
