@@ -76,7 +76,10 @@ The hybrid installer will:
 - Build Docker proxy container
 - Start both services
 
-**No manual prompts** - only OAuth browser authentication required.
+**Interactive prompts:**
+- Domain name (for optional Cloudflare Tunnel setup)
+- HDD mount point (default: `/home/openclaw-data`)
+- OpenAI OAuth browser authentication
 
 ---
 

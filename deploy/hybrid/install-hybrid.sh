@@ -102,7 +102,13 @@ setup_cloudflare_tunnel() {
     # Install cloudflared
     if ! command -v cloudflared &>/dev/null; then
         info "Installing cloudflared..."
-        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+        ARCH=$(uname -m)
+        case "$ARCH" in
+            x86_64)  CF_ARCH="amd64" ;;
+            aarch64|arm64) CF_ARCH="arm64" ;;
+            *) fail "Unsupported architecture: $ARCH (only x86_64 and arm64 are supported)" ;;
+        esac
+        curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" \
             -o /tmp/cloudflared
         install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
         rm /tmp/cloudflared
@@ -204,7 +210,7 @@ install_system_packages() {
 
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq curl git build-essential ca-certificates gnupg
+    apt-get install -y -qq curl git build-essential ca-certificates gnupg rsync
 
     # Node.js 22
     if ! command -v node &>/dev/null; then
@@ -248,7 +254,7 @@ create_directories() {
     mkdir -p /var/lib/openclaw-proxy
     mkdir -p "$HDD_MOUNT/openclaw-audit"
 
-    chown openclaw:openclaw /var/lib/openclaw
+    chown -R openclaw:openclaw /var/lib/openclaw
     chown 65534:65534 /var/lib/openclaw-proxy
     chown 65534:65534 "$HDD_MOUNT/openclaw-audit"
 
@@ -443,8 +449,14 @@ deploy_docker_proxy() {
 
     cd /opt/openclaw-secure-stack
 
-    # Copy hybrid docker-compose
-    cp "$(dirname "$0")/docker-compose.hybrid.yml" docker-compose.yml 2>/dev/null || \
+    # Copy hybrid docker-compose and substitute HDD mount path
+    if cp "$(dirname "$0")/docker-compose.hybrid.yml" docker-compose.yml 2>/dev/null; then
+        # Substitute the HDD mount path if user chose a non-default location
+        if [ "$HDD_MOUNT" != "/home/openclaw-data" ]; then
+            sed -i "s|/home/openclaw-data/openclaw-audit|$HDD_MOUNT/openclaw-audit|g" docker-compose.yml
+        fi
+    else
+        # Fallback: generate inline docker-compose with user's HDD path
         cat > docker-compose.yml <<EOF
 version: '3.8'
 
@@ -461,6 +473,7 @@ services:
       - OPENCLAW_TOKEN=\${OPENCLAW_TOKEN}
       - GOVERNANCE_ENABLED=true
       - GOVERNANCE_SECRET=\${GOVERNANCE_SECRET}
+      - AUDIT_LOG_PATH=/app/audit/audit.jsonl
     volumes:
       - ./config:/app/config:ro
       - /var/lib/openclaw-proxy:/app/data
@@ -474,6 +487,7 @@ services:
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
 EOF
+    fi
 
     info "Building proxy container (2-3 minutes)..."
     docker compose build --no-cache proxy
