@@ -128,9 +128,12 @@ class WebhookRelayPipeline:
                 )
 
         # Stage 4: Build messages with conversation history and forward to upstream
+        # Session key is namespaced by source to prevent cross-channel ID collisions
+        # (e.g. Telegram chat_id "123" vs WhatsApp phone "123").
+        session_id = f"{message.source}:{message.sender_id}"
         if self._history:
-            self._history.append_user(message.sender_id, clean_text)
-            messages: list[dict[str, str]] = self._history.get(message.sender_id)
+            self._history.append_user(session_id, clean_text)
+            messages: list[dict[str, str]] = self._history.get(session_id)
         else:
             messages = [{"role": "user", "content": clean_text}]
 
@@ -143,7 +146,7 @@ class WebhookRelayPipeline:
 
         # Update history with assistant reply (only on success)
         if self._history and upstream_response.status_code == 200:
-            self._history.append_assistant(message.sender_id, upstream_response.text)
+            self._history.append_assistant(session_id, upstream_response.text)
 
         # Stage 5: Response scan (indirect injection)
         if self._response_scanner and upstream_response.status_code == 200:

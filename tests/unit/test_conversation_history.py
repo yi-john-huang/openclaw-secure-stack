@@ -77,6 +77,28 @@ class TestConversationHistory:
         history = ConversationHistory()
         history.clear("does-not-exist")  # should not raise
 
+    def test_stale_sessions_are_evicted(self) -> None:
+        """P2: Sessions inactive beyond TTL are removed on next append_user."""
+        import time
+
+        history = ConversationHistory(session_ttl_seconds=0.01)  # 10ms TTL
+        history.append_user("old-user", "hello")
+        assert len(history.get("old-user")) == 1
+
+        time.sleep(0.05)  # wait past TTL
+
+        # Trigger eviction via a new session's append_user
+        history.append_user("new-user", "hi")
+        assert history.get("old-user") == []  # evicted
+        assert len(history.get("new-user")) == 1  # new session intact
+
+    def test_active_sessions_not_evicted(self) -> None:
+        """Sessions within TTL are preserved."""
+        history = ConversationHistory(session_ttl_seconds=60)
+        history.append_user("active", "hello")
+        history.append_user("trigger", "hi")  # triggers eviction scan
+        assert len(history.get("active")) == 1  # still alive
+
 
 class TestWebhookRelayWithHistory:
     """Integration: history wired into WebhookRelayPipeline."""
@@ -107,7 +129,6 @@ class TestWebhookRelayWithHistory:
             mock_fwd.return_value = WebhookResponse(text="hello!", status_code=200)
             await pipeline.relay(msg1)
 
-            # Capture the messages sent in the second call
             mock_fwd.return_value = WebhookResponse(text="it is noon", status_code=200)
             await pipeline.relay(msg2)
 
@@ -120,8 +141,8 @@ class TestWebhookRelayWithHistory:
         assert messages[1] == {"role": "assistant", "content": "hello!"}
         assert messages[2] == {"role": "user", "content": "what time is it?"}
 
-        # Full history after both turns has 4 messages
-        assert len(history.get("u1")) == 4
+        # Full history after both turns has 4 messages, keyed by source:sender_id
+        assert len(history.get("telegram:u1")) == 4
 
     @pytest.mark.asyncio
     async def test_history_not_updated_on_upstream_error(self) -> None:
@@ -149,7 +170,7 @@ class TestWebhookRelayWithHistory:
             await pipeline.relay(msg)
 
         # Only the user message should be in history; no assistant reply
-        msgs = history.get("u1")
+        msgs = history.get("telegram:u1")
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
 
@@ -180,14 +201,48 @@ class TestWebhookRelayWithHistory:
             await pipeline.relay(alice)
             await pipeline.relay(bob)
 
-        assert history.get("alice") == [
+        assert history.get("telegram:alice") == [
             {"role": "user", "content": "alice msg"},
             {"role": "assistant", "content": "ok"},
         ]
-        assert history.get("bob") == [
+        assert history.get("telegram:bob") == [
             {"role": "user", "content": "bob msg"},
             {"role": "assistant", "content": "ok"},
         ]
+
+    @pytest.mark.asyncio
+    async def test_same_id_different_channels_isolated(self) -> None:
+        """P1: Same numeric ID on Telegram vs WhatsApp uses separate sessions."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.webhook.history import ConversationHistory
+        from src.webhook.models import WebhookMessage, WebhookResponse
+        from src.webhook.relay import WebhookRelayPipeline
+
+        sanitizer = MagicMock()
+        sanitizer.sanitize.side_effect = lambda t: MagicMock(clean=t, injection_detected=False)
+        history = ConversationHistory()
+        pipeline = WebhookRelayPipeline(
+            sanitizer=sanitizer,
+            upstream_url="http://openclaw:3000",
+            upstream_token="tok",
+            conversation_history=history,
+        )
+
+        tg_msg = WebhookMessage(source="telegram", text="from telegram", sender_id="12345", metadata={})
+        wa_msg = WebhookMessage(source="whatsapp", text="from whatsapp", sender_id="12345", metadata={})
+
+        with patch.object(pipeline, "_forward_to_upstream", new_callable=AsyncMock) as mock_fwd:
+            mock_fwd.return_value = WebhookResponse(text="ok", status_code=200)
+            await pipeline.relay(tg_msg)
+            await pipeline.relay(wa_msg)
+
+        tg_history = history.get("telegram:12345")
+        wa_history = history.get("whatsapp:12345")
+        assert len(tg_history) == 2  # user + assistant
+        assert len(wa_history) == 2  # user + assistant
+        assert tg_history[0]["content"] == "from telegram"
+        assert wa_history[0]["content"] == "from whatsapp"
 
     @pytest.mark.asyncio
     async def test_relay_without_history_still_works(self) -> None:
