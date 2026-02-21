@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 import logging
 
-from anthropic import Anthropic, AuthenticationError, APIError
-
 logger = logging.getLogger(__name__)
 
 # Default model - can be overridden via environment variable
@@ -36,6 +34,15 @@ class LLMClient:
         Raises:
             LLMClientError: If ANTHROPIC_API_KEY is not set.
         """
+        try:
+            from anthropic import Anthropic, AuthenticationError
+
+        except ImportError as e:
+            raise RuntimeError(
+                "LLM enhancement requires the 'anthropic' package. "
+                "Install it with: pip install anthropic"
+            ) from e
+
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise LLMClientError(
@@ -64,6 +71,15 @@ class LLMClient:
         Raises:
             LLMClientError: If the API call fails or returns empty response.
         """
+        try:
+            from anthropic import APIError
+
+        except ImportError as e:
+            raise RuntimeError(
+                "LLM enhancement requires the 'anthropic' package. "
+                "Install it with: pip install anthropic"
+            ) from e
+
         try:
             response = self.client.messages.create(
                 model=self.model_name,

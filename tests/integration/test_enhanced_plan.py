@@ -12,6 +12,8 @@ Tests cover:
 from __future__ import annotations
 
 import json
+import sys
+
 import pytest
 from datetime import UTC, datetime
 from typing import Any
@@ -1114,3 +1116,243 @@ class TestMiddlewareCreateEnhancedPlan:
         )
 
         assert middleware._enhancement_enabled is False
+
+class TestLLMClientInit:
+    """Tests for LLMClient initialization."""
+
+    def test_raises_when_anthropic_not_installed(self, monkeypatch):
+        """Test that LLMClient raises helpful error when anthropic not installed."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        # Remove anthropic from modules if present
+        with patch.dict(sys.modules, {"anthropic": None}):
+            from src.llm.client import LLMClient
+
+            with pytest.raises(RuntimeError, match="pip install anthropic"):
+                LLMClient()
+
+    def test_raises_without_api_key(self, monkeypatch):
+        """Test that LLMClient raises error when API key not set."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        mock_anthropic_module = MagicMock()
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient, LLMClientError
+
+            with pytest.raises(LLMClientError, match="ANTHROPIC_API_KEY"):
+                LLMClient()
+
+    def test_uses_default_model(self, monkeypatch):
+        """Test that LLMClient uses default model when not specified."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+        mock_anthropic_module = MagicMock()
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient, DEFAULT_MODEL
+
+            client = LLMClient()
+            assert client.model_name == DEFAULT_MODEL
+
+    def test_uses_env_model(self, monkeypatch):
+        """Test that LLMClient uses model from environment variable."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-custom-model")
+
+        mock_anthropic_module = MagicMock()
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            # Reload to pick up env var
+            import importlib
+            from src.llm import client as llm_module
+            importlib.reload(llm_module)
+
+            client = llm_module.LLMClient()
+            assert client.model_name == "claude-custom-model"
+
+    def test_uses_provided_model(self, monkeypatch):
+        """Test that LLMClient uses model passed to constructor."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        mock_anthropic_module = MagicMock()
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient
+
+            client = LLMClient(model="my-custom-model")
+            assert client.model_name == "my-custom-model"
+
+    def test_uses_default_timeout(self, monkeypatch):
+        """Test that LLMClient uses default timeout when not specified."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.delenv("ANTHROPIC_TIMEOUT_SECONDS", raising=False)
+
+        mock_anthropic_module = MagicMock()
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient, DEFAULT_TIMEOUT
+
+            client = LLMClient()
+            assert client.timeout_seconds == DEFAULT_TIMEOUT
+
+    def test_uses_provided_timeout(self, monkeypatch):
+        """Test that LLMClient uses timeout passed to constructor."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        mock_anthropic_module = MagicMock()
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient
+
+            client = LLMClient(timeout_seconds=90)
+            assert client.timeout_seconds == 90
+
+    def test_creates_anthropic_client_with_timeout(self, monkeypatch):
+        """Test that Anthropic client is created with correct timeout."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        mock_anthropic = MagicMock()
+        mock_anthropic_module = MagicMock()
+        mock_anthropic_module.Anthropic = mock_anthropic
+        mock_anthropic_module.AuthenticationError = Exception
+
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient
+
+            LLMClient(timeout_seconds=45)
+            mock_anthropic.assert_called_once_with(timeout=45)
+
+
+class TestLLMClientComplete:
+    """Tests for LLMClient.complete() method."""
+
+    @pytest.fixture
+    def mock_anthropic_module(self):
+        """Create a mock anthropic module."""
+        mock_module = MagicMock()
+        mock_module.AuthenticationError = type("AuthenticationError", (Exception,), {})
+        mock_module.APIError = type("APIError", (Exception,), {})
+        return mock_module
+
+    @pytest.fixture
+    def mock_client(self, monkeypatch, mock_anthropic_module):
+        """Create a LLMClient with mocked Anthropic."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        mock_instance = MagicMock()
+        mock_anthropic_module.Anthropic.return_value = mock_instance
+
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic_module}):
+            from src.llm.client import LLMClient
+            client = LLMClient()
+
+            yield client, mock_instance, mock_anthropic_module
+
+    def test_complete_returns_text(self, mock_client):
+        """Test that complete returns the response text."""
+        client, mock_anthropic, mock_module = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Hello, world!")]
+        mock_anthropic.messages.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            result = client.complete("Say hello")
+        assert result == "Hello, world!"
+
+    def test_complete_uses_model(self, mock_client):
+        """Test that complete uses the configured model."""
+        client, mock_anthropic, mock_module = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="response")]
+        mock_anthropic.messages.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            client.complete("prompt")
+
+        call_args = mock_anthropic.messages.create.call_args
+        assert call_args.kwargs["model"] == client.model_name
+
+    def test_complete_uses_temperature(self, mock_client):
+        """Test that complete passes temperature parameter."""
+        client, mock_anthropic, mock_module = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="response")]
+        mock_anthropic.messages.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            client.complete("prompt", temperature=0.7)
+
+        call_args = mock_anthropic.messages.create.call_args
+        assert call_args.kwargs["temperature"] == 0.7
+
+    def test_complete_default_temperature_zero(self, mock_client):
+        """Test that complete defaults to temperature=0."""
+        client, mock_anthropic, mock_module = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="response")]
+        mock_anthropic.messages.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            client.complete("prompt")
+
+        call_args = mock_anthropic.messages.create.call_args
+        assert call_args.kwargs["temperature"] == 0
+
+    def test_complete_raises_on_empty_response(self, mock_client):
+        """Test that complete raises error on empty response."""
+        client, mock_anthropic, mock_module = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = []  # Empty content
+        mock_anthropic.messages.create.return_value = mock_response
+
+        from src.llm.client import LLMClientError
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            with pytest.raises(LLMClientError, match="empty response"):
+                client.complete("prompt")
+
+    def test_complete_raises_on_api_error(self, mock_client):
+        """Test that complete raises LLMClientError on API error."""
+        client, mock_anthropic, mock_module = mock_client
+
+        # Raise APIError from messages.create
+        mock_anthropic.messages.create.side_effect = mock_module.APIError("Rate limited")
+
+        from src.llm.client import LLMClientError
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            with pytest.raises(LLMClientError, match="API call failed"):
+                client.complete("prompt")
+
+    def test_complete_sets_max_tokens(self, mock_client):
+        """Test that complete sets max_tokens."""
+        client, mock_anthropic, mock_module = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="response")]
+        mock_anthropic.messages.create.return_value = mock_response
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            client.complete("prompt")
+
+        call_args = mock_anthropic.messages.create.call_args
+        assert call_args.kwargs["max_tokens"] == 4096
+
+    def test_complete_raises_when_anthropic_not_installed(self, monkeypatch):
+        """Test that complete raises error if anthropic disappears."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        # First create a valid client
+        mock_module = MagicMock()
+        mock_module.AuthenticationError = Exception
+        mock_module.APIError = Exception
+
+        with patch.dict(sys.modules, {"anthropic": mock_module}):
+            from src.llm.client import LLMClient
+            client = LLMClient()
+
+        # Now make anthropic unavailable for complete()
+        with patch.dict(sys.modules, {"anthropic": None}):
+            with pytest.raises(RuntimeError, match="pip install anthropic"):
+                client.complete("prompt")
