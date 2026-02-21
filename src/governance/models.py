@@ -11,13 +11,13 @@ This module defines all data models for the governance layer including:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models import RiskLevel, Severity
-from datetime import UTC, datetime
 
 # --- Enums ---
 
@@ -319,6 +319,36 @@ class ExecutionContext(BaseModel):
     preferences: dict[str, Any] = Field(default_factory=dict)
 
 
+class ConditionalBranch(BaseModel):
+    """Conditional execution branch."""
+
+    model_config = ConfigDict(frozen=True)
+
+    condition: str  # Expression to evaluate
+    if_true: list[int] = Field(default_factory=list)  # Step sequences to run if true
+    if_false: list[int] = Field(default_factory=list)  # Step sequences to run if false
+
+
+class RecoveryPath(BaseModel):
+    """Recovery path for a failed step."""
+
+    model_config = ConfigDict(frozen=True)
+
+    trigger_step: int  # Which step this recovers from
+    trigger_errors: list[str] = Field(default_factory=list)  # Error patterns that trigger this
+    strategy: RecoveryStrategy
+
+    # For RETRY strategy
+    max_retries: int = Field(default=3, ge=1)
+    backoff_ms: int = Field(default=1000, ge=0)
+
+    # For ALTERNATIVE strategy
+    alternative_steps: list[PlannedAction] = Field(default_factory=list)
+
+    # For REPLAN strategy
+    replan_constraints: list[str] = Field(default_factory=list)
+
+
 class ExecutionState(BaseModel):
     """Full state machine for plan execution."""
 
@@ -407,8 +437,20 @@ class EnhancedExecutionPlan(BaseModel):
     def risk_assessment(self) -> RiskAssessment:
         return self.base_plan.risk_assessment
 
-    def initialize_state(self, session_id: str, user_id: str, token: str) -> None:
-        """Initialize execution state. Call before execute()."""
+    def initialize_state(self, session_id: str | None, user_id: str, token: str) -> None:
+        """Initialize execution state. Call before execute().
+
+        Args:
+            session_id: Session ID (required).
+            user_id: User ID.
+            token: Plan token.
+
+        Raises:
+            ValueError: If session_id is None.
+        """
+        if session_id is None:
+            raise ValueError("session_id is required for execution state initialization")
+
         context = ExecutionContext(
             plan_id=self.plan_id,
             session_id=session_id,
@@ -422,35 +464,5 @@ class EnhancedExecutionPlan(BaseModel):
             current_sequence=0,
             status=StepStatus.PENDING,
             total_steps=len(self.actions),
+            started_at=datetime.now(UTC).isoformat(),
         )
-
-
-class ConditionalBranch(BaseModel):
-    """Conditional execution branch."""
-
-    model_config = ConfigDict(frozen=True)
-
-    condition: str  # Expression to evaluate
-    if_true: list[int] = Field(default_factory=list)  # Step sequences to run if true
-    if_false: list[int] = Field(default_factory=list)  # Step sequences to run if false
-
-
-class RecoveryPath(BaseModel):
-    """Recovery path for a failed step."""
-
-    model_config = ConfigDict(frozen=True)
-
-    trigger_step: int  # Which step this recovers from
-    trigger_errors: list[str] = Field(default_factory=list)  # Error patterns that trigger this
-    strategy: RecoveryStrategy
-
-    # For RETRY strategy
-    max_retries: int = Field(default=3, ge=1)
-    backoff_ms: int = Field(default=1000, ge=0)
-
-    # For ALTERNATIVE strategy
-    alternative_steps: list[PlannedAction] = Field(default_factory=list)
-
-    # For REPLAN strategy
-    replan_constraints: list[str] = Field(default_factory=list)
-

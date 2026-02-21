@@ -9,6 +9,7 @@ This module provides the PlanGenerator class for:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -16,6 +17,8 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from src.governance.models import (
     ExecutionPlan,
@@ -98,6 +101,7 @@ class PlanGenerator:
 
         Args:
             patterns_path: Path to the intent-patterns.json config file.
+            llm: Optional LLM client for plan enhancement.
             schema_path: Path to execution-plan.json schema file.
         """
         self._patterns_path = patterns_path
@@ -145,6 +149,14 @@ class PlanGenerator:
             risk_assessment=risk_assessment,
         )
 
+    # Sensitive argument keys that should be redacted before sending to LLM
+    SENSITIVE_KEYS = {
+        "password", "passwd", "secret", "token", "api_key", "apikey",
+        "auth", "authorization", "credential", "credentials", "private_key",
+        "privatekey", "access_token", "refresh_token", "bearer", "jwt",
+        "ssh_key", "sshkey", "passphrase", "pin", "otp", "mfa",
+    }
+
     def enhance(
             self,
             plan: ExecutionPlan,
@@ -177,9 +189,10 @@ class PlanGenerator:
                 "Create config/execution-plan.json with the plan schema."
             )
 
-        # Serialize base plan for prompt
+        # Serialize and sanitize base plan for prompt
         plan_dict = plan.model_dump(mode="json")
-        plan_json = json.dumps(plan_dict, indent=2)
+        sanitized_plan = self._sanitize_for_llm(plan_dict)
+        plan_json = json.dumps(sanitized_plan, indent=2)
 
         context_str = json.dumps(context or {}, indent=2)
         schema_str = json.dumps(self._schema, indent=2)
@@ -191,6 +204,15 @@ class PlanGenerator:
             schema=schema_str,
         )
 
+        # Security audit: log external API call with sanitized plan
+        logger.info(
+            "SECURITY_AUDIT: Calling external LLM API for plan enhancement: "
+            "plan_id=%s, action_count=%d, fields_redacted=%s",
+            plan.plan_id,
+            len(plan.actions),
+            self._count_redacted_fields(sanitized_plan),
+        )
+
         # Call LLM
         raw = llm.complete(prompt=prompt, temperature=0)
 
@@ -199,6 +221,38 @@ class PlanGenerator:
 
         # Build EnhancedExecutionPlan from base plan + LLM output
         return self._build_enhanced_plan(plan, enhanced_dict)
+
+    def _sanitize_for_llm(self, data: Any) -> Any:
+        """Recursively sanitize data before sending to LLM.
+
+        Redacts values for sensitive keys to prevent credential leakage.
+        """
+        if isinstance(data, dict):
+            result = {}
+            for key, value in data.items():
+                if key.lower() in self.SENSITIVE_KEYS:
+                    result[key] = "[REDACTED]"
+                else:
+                    result[key] = self._sanitize_for_llm(value)
+            return result
+        elif isinstance(data, list):
+            return [self._sanitize_for_llm(item) for item in data]
+        else:
+            return data
+
+    def _count_redacted_fields(self, data: Any) -> int:
+        """Count how many fields were redacted in sanitized data."""
+        count = 0
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if value == "[REDACTED]":
+                    count += 1
+                else:
+                    count += self._count_redacted_fields(value)
+        elif isinstance(data, list):
+            for item in data:
+                count += self._count_redacted_fields(item)
+        return count
 
     def _parse_llm_response(self, raw: str) -> dict[str, Any]:
         """Parse and clean LLM JSON response."""
@@ -505,5 +559,3 @@ class PlanGenerator:
             factors=factors,
             mitigations=mitigations,
         )
-
-

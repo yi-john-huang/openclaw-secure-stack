@@ -188,7 +188,7 @@ class TestExecutionEngine:
         engine = ExecutionEngine(mock_enforcer, mock_tool_executor)
 
         # Current implementation raises AttributeError when accessing state.step_results
-        with pytest.raises(AttributeError):
+        with pytest.raises(ExecutionError, match="state not initialized"):
             await engine.execute(enhanced)
 
     @pytest.mark.asyncio
@@ -308,7 +308,9 @@ class TestExecutionEngine:
         result = enhanced.state.step_results[0]
         assert result.status == StepStatus.FAILED
         assert result.error == "Persistent failure"
-        assert result.retry_count == 2
+        # max_retries=2 means 3 total attempts (1 initial + 2 retries)
+        # attempt counter ends at 3 after all attempts exhausted
+        assert result.retry_count == 3
 
     @pytest.mark.asyncio
     async def test_execute_fail_fast_stops_execution(
@@ -482,14 +484,19 @@ class TestExecutionEngine:
 
 
 class TestExecutionEngineConditionals:
-    """Tests for conditional execution logic."""
+    """Tests for conditional execution logic.
+
+    NOTE: Conditional logic is currently stubbed (_should_skip returns False).
+    These tests verify the stubbed behavior. When conditionals are implemented,
+    update these tests accordingly.
+    """
 
     @pytest.mark.asyncio
-    async def test_conditional_skip_on_previous_failure(
+    async def test_conditional_skip_stubbed_executes_all_steps(
         self,
         mock_enforcer: MagicMock,
     ):
-        """Test that steps are skipped based on conditionals."""
+        """Test that all steps execute when conditionals are stubbed."""
         actions = [
             PlannedAction(
                 sequence=0,
@@ -529,7 +536,7 @@ class TestExecutionEngineConditionals:
             conditionals=[
                 ConditionalBranch(
                     condition="step_0_success",
-                    if_true=[1],  # Run step 1 if step 0 succeeds
+                    if_true=[1],  # Would run step 1 if step 0 succeeds
                     if_false=[],
                 )
             ],
@@ -561,10 +568,12 @@ class TestExecutionEngineConditionals:
 
         await engine.execute(enhanced)
 
-        # Step 1 should be skipped because step 0 failed
-        assert enhanced.state.skipped_steps == 1
+        # With conditionals stubbed, step 1 executes despite step 0 failure
+        # (conditionals are ignored, _should_skip always returns False)
+        assert enhanced.state.skipped_steps == 0
         assert len(enhanced.state.step_results) == 2
-        assert enhanced.state.step_results[1].status == StepStatus.SKIPPED
+        assert enhanced.state.step_results[0].status == StepStatus.FAILED
+        assert enhanced.state.step_results[1].status == StepStatus.COMPLETED
 
 
 # --- AgentContextInjector Tests ---
@@ -862,3 +871,266 @@ class TestExecutionEngineLogging:
         # Should have debug log about completion
         assert any("finished" in record.message.lower() or "plan-123" in record.message
                    for record in caplog.records)
+
+
+# --- Additional Tests for Review Fixes ---
+
+
+class TestInitializeStateValidation:
+    """Tests for initialize_state() session_id validation."""
+
+    def test_initialize_state_raises_on_none_session_id(
+        self,
+        sample_execution_plan: ExecutionPlan,
+    ):
+        """Test that initialize_state raises ValueError when session_id is None."""
+        enhanced = EnhancedExecutionPlan(
+            base_plan=sample_execution_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+
+        with pytest.raises(ValueError, match="session_id is required"):
+            enhanced.initialize_state(
+                session_id=None,
+                user_id="user-123",
+                token="token-abc",
+            )
+
+    def test_initialize_state_accepts_valid_session_id(
+        self,
+        sample_execution_plan: ExecutionPlan,
+    ):
+        """Test that initialize_state works with valid session_id."""
+        enhanced = EnhancedExecutionPlan(
+            base_plan=sample_execution_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+
+        # Should not raise
+        enhanced.initialize_state(
+            session_id="valid-session-id",
+            user_id="user-123",
+            token="token-abc",
+        )
+
+        assert enhanced.state is not None
+        assert enhanced.state.session_id == "valid-session-id"
+
+
+class TestShouldSkipStubbed:
+    """Tests for _should_skip() being stubbed."""
+
+    @pytest.mark.asyncio
+    async def test_should_skip_always_returns_false(
+        self,
+        mock_enforcer: MagicMock,
+        mock_tool_executor: AsyncMock,
+    ):
+        """Test that _should_skip returns False (conditionals disabled)."""
+        # Create plan with conditionals that would normally skip step 1
+        actions = [
+            PlannedAction(
+                sequence=0,
+                tool_call=ToolCall(name="step0", arguments={}),
+                category=IntentCategory.FILE_READ,
+                resources=[],
+                risk_score=10,
+            ),
+            PlannedAction(
+                sequence=1,
+                tool_call=ToolCall(name="step1", arguments={}),
+                category=IntentCategory.FILE_READ,
+                resources=[],
+                risk_score=10,
+            ),
+        ]
+
+        base_plan = ExecutionPlan(
+            plan_id="plan-123",
+            session_id="session-456",
+            request_hash="a" * 64,
+            actions=actions,
+            risk_assessment=RiskAssessment(
+                overall_score=10,
+                level=RiskLevel.LOW,
+                factors=[],
+                mitigations=[],
+            ),
+        )
+
+        enhanced = EnhancedExecutionPlan(
+            base_plan=base_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],
+            conditionals=[
+                # This conditional would skip step 1 if step 0 fails
+                ConditionalBranch(
+                    condition="step_0_success",
+                    if_true=[1],
+                    if_false=[],
+                )
+            ],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+        enhanced.initialize_state(
+            session_id="session-456",
+            user_id="user-123",
+            token="token-abc",
+        )
+
+        # Make step 0 fail
+        mock_tool_executor.execute = AsyncMock(side_effect=[
+            Exception("Step 0 failed"),
+            {"result": "step 1 success"},
+        ])
+
+        engine = ExecutionEngine(mock_enforcer, mock_tool_executor)
+
+        await engine.execute(enhanced)
+
+        # Both steps should have been attempted (conditionals are stubbed)
+        assert len(enhanced.state.step_results) == 2
+        assert enhanced.state.step_results[0].status == StepStatus.FAILED
+        assert enhanced.state.step_results[1].status == StepStatus.COMPLETED
+
+
+class TestRetrySemantics:
+    """Tests for correct retry semantics (max_retries=N means N retries after initial)."""
+
+    @pytest.mark.asyncio
+    async def test_max_retries_1_gives_2_total_attempts(
+        self,
+        sample_execution_plan: ExecutionPlan,
+        mock_enforcer: MagicMock,
+    ):
+        """Test that max_retries=1 means 1 initial + 1 retry = 2 attempts."""
+        enhanced = EnhancedExecutionPlan(
+            base_plan=sample_execution_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[
+                RecoveryPath(
+                    trigger_step=0,
+                    strategy=RecoveryStrategy.RETRY,
+                    max_retries=1,
+                    backoff_ms=1,
+                )
+            ],
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+        enhanced.initialize_state(
+            session_id="session-456",
+            user_id="user-123",
+            token="token-abc",
+        )
+
+        call_count = 0
+
+        async def counting_executor(tool_name, arguments, context):
+            nonlocal call_count
+            call_count += 1
+            raise Exception("Always fails")
+
+        tool_executor = AsyncMock(spec=ToolExecutorAdapter)
+        tool_executor.execute = counting_executor
+
+        engine = ExecutionEngine(mock_enforcer, tool_executor)
+
+        await engine.execute(enhanced)
+
+        # Should have been called exactly 2 times (1 initial + 1 retry)
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_max_retries_0_gives_1_total_attempt(
+        self,
+        sample_execution_plan: ExecutionPlan,
+        mock_enforcer: MagicMock,
+    ):
+        """Test that max_retries=0 (or no recovery path) means 1 attempt only."""
+        enhanced = EnhancedExecutionPlan(
+            base_plan=sample_execution_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],  # No recovery path
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+        enhanced.initialize_state(
+            session_id="session-456",
+            user_id="user-123",
+            token="token-abc",
+        )
+
+        call_count = 0
+
+        async def counting_executor(tool_name, arguments, context):
+            nonlocal call_count
+            call_count += 1
+            raise Exception("Always fails")
+
+        tool_executor = AsyncMock(spec=ToolExecutorAdapter)
+        tool_executor.execute = counting_executor
+
+        engine = ExecutionEngine(mock_enforcer, tool_executor)
+
+        await engine.execute(enhanced)
+
+        # Should have been called exactly 1 time (no retries)
+        assert call_count == 1
+
+
+class TestDurationLogging:
+    """Tests for duration calculation timing."""
+
+    @pytest.mark.asyncio
+    async def test_completed_at_set_before_duration_calc(
+        self,
+        sample_enhanced_plan: EnhancedExecutionPlan,
+        mock_enforcer: MagicMock,
+        mock_tool_executor: AsyncMock,
+    ):
+        """Test that completed_at is set, enabling duration calculation."""
+        engine = ExecutionEngine(mock_enforcer, mock_tool_executor)
+
+        await engine.execute(sample_enhanced_plan)
+
+        # completed_at should be set
+        assert sample_enhanced_plan.state.completed_at is not None
+        # started_at should also be set
+        assert sample_enhanced_plan.state.started_at is not None
+
+        # Duration calculation should work (not return "incomplete")
+        duration = engine._calc_total_duration(sample_enhanced_plan)
+        assert duration != "incomplete"
+        assert duration != "unknown"

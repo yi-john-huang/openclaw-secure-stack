@@ -491,6 +491,57 @@ class TestEnhancedExecutionPlan:
         assert context.user_id == "user-123"
         assert context.token == "token-abc"
 
+    def test_initialize_state_raises_on_none_session_id(
+        self, sample_execution_plan: ExecutionPlan
+    ):
+        """Test that initialize_state raises ValueError when session_id is None."""
+        enhanced = EnhancedExecutionPlan(
+            base_plan=sample_execution_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+
+        with pytest.raises(ValueError, match="session_id is required"):
+            enhanced.initialize_state(
+                session_id=None,
+                user_id="user-123",
+                token="token-abc",
+            )
+
+    def test_initialize_state_sets_started_at(
+        self, sample_execution_plan: ExecutionPlan
+    ):
+        """Test that initialize_state sets started_at timestamp."""
+        enhanced = EnhancedExecutionPlan(
+            base_plan=sample_execution_plan,
+            description="Test",
+            constraints=[],
+            preferences=[],
+            recovery_paths=[],
+            conditionals=[],
+            execution_mode=ExecutionMode.GOVERNANCE_DRIVEN,
+            operations=[],
+            global_constraints={},
+            metadata={},
+        )
+
+        enhanced.initialize_state(
+            session_id="session-123",
+            user_id="user-123",
+            token="token-abc",
+        )
+
+        assert enhanced.state.started_at is not None
+        # Should be a valid ISO format datetime
+        datetime.fromisoformat(enhanced.state.started_at)
+
 
 # --- Middleware Enhancement Settings Tests ---
 

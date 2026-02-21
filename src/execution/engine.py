@@ -25,6 +25,7 @@ from src.governance.models import (
     RecoveryStrategy,
     StepResult,
     StepStatus,
+    PlannedAction,
 )
 
 
@@ -123,6 +124,13 @@ class ExecutionEngine:
         Returns:
             Final ExecutionState with all results.
         """
+        # Validate state is initialized
+        if plan.state is None:
+            raise ExecutionError(
+                message="Plan state not initialized. Call initialize_state() first.",
+                step=-1,
+                recoverable=False,
+            )
 
         plan.state.status = StepStatus.RUNNING
         plan.state.started_at = datetime.now(UTC).isoformat()
@@ -179,17 +187,18 @@ class ExecutionEngine:
                 str(e),
             )
 
+        plan.state.completed_at = datetime.now(UTC).isoformat()
+
         logger.debug(
             "Execution finished: plan_id=%s, final_status=%s, duration=%s",
             plan.plan_id,
             plan.state.status.value,
             self._calc_total_duration(plan),
         )
-        plan.state.completed_at = datetime.now(UTC).isoformat()
     
     async def _execute_with_recovery(
         self,
-        action: Any,  # PlannedAction
+        action: PlannedAction,
         context: ExecutionContext,
         recovery_path: RecoveryPath | None,
     ) -> StepResult:
@@ -204,12 +213,14 @@ class ExecutionEngine:
             StepResult with outcome.
         """
         started_at = datetime.now(UTC).isoformat()
-        retry_count = 0
-        max_retries = recovery_path.max_retries if recovery_path else 1
+        attempt = 0
+
+        # max_retries=3 means 1 initial attempt + 3 retries = 4 total attempts
+        max_attempts = 1 + (recovery_path.max_retries if recovery_path else 0)
         
         last_error: str | None = None
         
-        while retry_count < max_retries:
+        while attempt < max_attempts:
             try:
                 # Check governance
                 tool_call = ToolCall(
@@ -259,16 +270,16 @@ class ExecutionEngine:
                     tool_args=action.tool_call.arguments,
                     tool_result=result,
                     governance_decision=GovernanceDecision.ALLOW,
-                    retry_count=retry_count,
+                    retry_count=attempt,
                 )
                 
             except Exception as e:
                 last_error = str(e)
-                retry_count += 1
+                attempt += 1
                 
                 # Check if we should retry
                 if recovery_path and recovery_path.strategy == RecoveryStrategy.RETRY:
-                    if retry_count < max_retries:
+                    if attempt < max_attempts:
                         # Backoff before retry
                         await asyncio.sleep(recovery_path.backoff_ms / 1000)
                         continue
@@ -276,7 +287,7 @@ class ExecutionEngine:
                 # No more retries
                 break
         
-        # All retries exhausted or not retrying
+        # All attempts exhausted or not retrying
         completed_at = datetime.now(UTC).isoformat()
         duration_ms = self._calc_duration_ms(started_at, completed_at)
         
@@ -298,27 +309,22 @@ class ExecutionEngine:
             tool_name=action.tool_call.name,
             tool_args=action.tool_call.arguments,
             error=last_error,
-            retry_count=retry_count,
+            retry_count=attempt,
             recovery_action=recovery_action,
         )
-    
+
     def _should_skip(
-        self,
-        sequence: int,
-        plan: EnhancedExecutionPlan
+            self,
+            sequence: int,
+            plan: EnhancedExecutionPlan
     ) -> bool:
-        """Check if this step should be skipped based on conditionals."""
-        # Check conditionals
-        for cond in plan.conditionals:
-            if sequence in cond.if_true or sequence in cond.if_false:
-                # Evaluate condition based on previous results
-                # For now, simple: if any previous step failed, skip dependent steps
-                for result in plan.state.step_results:
-                    if result.status == StepStatus.FAILED:
-                        if sequence in cond.if_true:
-                            return True
+        """Check if this step should be skipped based on conditionals.
+
+        TODO: Implement conditional logic when schema stabilizes.
+        For now, never skip — execute all steps in sequence.
+        """
         return False
-    
+
     def _get_recovery_path(
         self,
         sequence: int,
