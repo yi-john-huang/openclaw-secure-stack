@@ -15,6 +15,7 @@ Pipeline stages:
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -38,6 +39,27 @@ _MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB (NFR-7)
 
 
 
+def _extract_pdf_text(data: bytes, file_name: str) -> str:
+    """Extract plain text from PDF bytes using pypdf.
+
+    Returns a header line plus the extracted text. On failure (encrypted,
+    corrupted, or scanned-image PDFs) returns a placeholder so the LLM still
+    knows a PDF was attached even if content is unavailable.
+    """
+    try:
+        import pypdf  # local import — optional dependency
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n\n".join(p.strip() for p in pages if p.strip())
+        if text:
+            return f"[PDF: {file_name}]\n\n{text}"
+        # Scanned/image-only PDF — no extractable text
+        return f"[PDF: {file_name}] (no extractable text — may be a scanned image)"
+    except Exception:
+        logger.warning("Failed to extract text from PDF %s", file_name, exc_info=True)
+        return f"[PDF: {file_name}] (could not parse)"
+
+
 def _build_content_parts(
     text: str,
     attachments: list[Attachment],
@@ -50,7 +72,8 @@ def _build_content_parts(
     Content block format by attachment type:
     - IMAGE/STICKER: image_url block with data URI
     - AUDIO/VOICE: input_audio block with base64 + format
-    - DOCUMENT/VIDEO: file block with base64 content
+    - PDF: text block with pypdf-extracted plain text
+    - VIDEO/other: text placeholder (unsupported binary format)
     """
     if not attachments:
         return text
@@ -81,17 +104,14 @@ def _build_content_parts(
                 },
             })
         elif attachment.mime_type == "application/pdf":
-            # Anthropic-native document block (Claude reads PDF content natively)
-            parts.append({
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": encoded,
-                },
-            })
+            # Extract text from the PDF and send as a plain text block.
+            # Sending base64 binary to OpenClaw exceeds its gateway body limit
+            # (~1MB) and results in immediate TCP-reset → 502. Extracted text
+            # is typically 10-100x smaller and works with any LLM backend.
+            pdf_text = _extract_pdf_text(attachment.data, attachment.file_name)
+            parts.append({"type": "text", "text": pdf_text})
         else:
-            # VIDEO and other binary formats unsupported by LLM → text placeholder
+            # VIDEO and other binary formats unsupported → text placeholder
             parts.append({
                 "type": "text",
                 "text": f"[{attachment.type.value}: {attachment.file_name}]",

@@ -12,6 +12,7 @@ dependencies = [
     "tree-sitter>=0.24.0",
     "tree-sitter-javascript>=0.23.0",
     "tree-sitter-typescript>=0.23.0",
+    "pypdf>=4.0.0",
 ]
 
 [project.scripts]
