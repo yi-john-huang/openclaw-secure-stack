@@ -407,7 +407,7 @@ def _register_webhook_routes(
                         source_ip=source_ip,
                         details={"source": "telegram", "update_id": extraction.update_id},
                     ))
-                return JSONResponse({"error": "Replay detected"}, status_code=409)
+                return JSONResponse({"status": "ok", "message": "Duplicate update"}, status_code=200)
 
             # Download file attachments (after replay check to avoid wasted work)
             attachments = await tg_relay.build_attachments(
@@ -556,7 +556,7 @@ def _register_webhook_routes(
                                 "timestamp": msg_data["timestamp"],
                             },
                         ))
-                    return JSONResponse({"error": "Replay detected"}, status_code=409)
+                    return JSONResponse({"status": "ok", "message": "Duplicate update"}, status_code=200)
 
                 if not msg_data["text"]:
                     continue
