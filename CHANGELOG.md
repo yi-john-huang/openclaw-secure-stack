@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-02-22
+
+### Fixed
+- **`send_response` ConnectTimeout** — Telegram `sendMessage` API calls now use an explicit `httpx.Timeout(connect=10s, read=30s)` instead of the default 5 s; eliminates `ConnectTimeout` errors when sending the bot reply back to users
+- **PDF content unreadable by Claude** — changed PDF content block from the custom OpenAI `"file"` type to Anthropic-native `"document"` block (`{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", ...}}`); Claude was ignoring the `"file"` block and responding that it couldn't see the attachment
+- **Video/unsupported binary silent drop** — video and other non-image/non-PDF/non-audio attachments now send a `[video: filename]` text placeholder instead of silently omitting the content
+- **`httpx.ReadError` unhandled in upstream forwarder** — added `httpx.ReadError` to the caught exceptions in `_forward_to_upstream`; previously a mid-response TCP reset caused an unhandled 500 and triggered Telegram's infinite retry loop
+- **Replay protection returning 409** — changed duplicate-update response from `409 Conflict` to `200 OK` so Telegram marks the webhook delivered and advances to the next `update_id` instead of retrying indefinitely
+- **File download read timeout** — increased Telegram binary download read timeout from default 5 s to 120 s; large files (e.g. ~1 MB PDFs on a slow link) were timing out mid-download
+
 ## [1.5.0] - 2026-02-21
 
 ### Added
