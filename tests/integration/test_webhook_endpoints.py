@@ -8,12 +8,13 @@ import json
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.proxy.app import create_app
+from src.webhook.models import WebhookResponse
 
 
 def _make_telegram_headers(bot_token: str) -> dict[str, str]:
@@ -215,31 +216,26 @@ class TestTelegramEndpoints:
             assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_telegram_replay_attack_409(self, app_with_telegram: Any) -> None:
-        """Duplicate update_id -> 409 (FR-2.7)."""
+    async def test_telegram_replay_attack_deduplicated(self, app_with_telegram: Any) -> None:
+        """Duplicate update_id is silently deduplicated with 200 (FR-2.7).
+
+        Telegram requires 200 OK for ALL webhook deliveries — returning non-200
+        causes Telegram to retry, which is exactly what replay protection must prevent.
+        The response body distinguishes success from dedup ("Duplicate update").
+        """
         headers = _make_telegram_headers("123:ABC")
         transport = ASGITransport(app=app_with_telegram)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("src.webhook.relay.httpx.AsyncClient") as mock_fwd_cls, \
-                 patch("src.webhook.telegram.httpx.AsyncClient") as mock_tg_cls:
-                # Mock upstream (relay pipeline)
-                mock_fwd = AsyncMock()
-                mock_resp = MagicMock()
-                mock_resp.status_code = 200
-                mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
-                mock_resp.text = "ok"
-                mock_fwd.post.return_value = mock_resp
-                mock_fwd.__aenter__ = AsyncMock(return_value=mock_fwd)
-                mock_fwd.__aexit__ = AsyncMock(return_value=False)
-                mock_fwd_cls.return_value = mock_fwd
-
-                # Mock Telegram API (send_response)
-                mock_tg = AsyncMock()
-                mock_tg.post.return_value = MagicMock(status_code=200)
-                mock_tg.__aenter__ = AsyncMock(return_value=mock_tg)
-                mock_tg.__aexit__ = AsyncMock(return_value=False)
-                mock_tg_cls.return_value = mock_tg
-
+            # B2: patch at method level — pooled clients are created at app startup,
+            # so patching httpx.AsyncClient after the fact would have no effect.
+            with patch(
+                "src.webhook.relay.WebhookRelayPipeline._forward_to_upstream",
+                new_callable=AsyncMock,
+                return_value=WebhookResponse(text="ok", status_code=200),
+            ), patch(
+                "src.webhook.telegram.TelegramRelay.send_response",
+                new_callable=AsyncMock,
+            ):
                 # First request succeeds
                 resp1 = await client.post(
                     "/webhook/telegram",
@@ -248,13 +244,14 @@ class TestTelegramEndpoints:
                 )
                 assert resp1.status_code == 200
 
-                # Same update_id -> replay rejected
+                # Same update_id -> replay silently deduplicated (200 + body marker)
                 resp2 = await client.post(
                     "/webhook/telegram",
                     json=_make_telegram_update(update_id=100),
                     headers=headers,
                 )
-                assert resp2.status_code == 409
+                assert resp2.status_code == 200
+                assert resp2.json().get("message") == "Duplicate update"
 
     @pytest.mark.asyncio
     async def test_telegram_rate_limited_429(self, tmp_path: Path) -> None:
@@ -268,24 +265,15 @@ class TestTelegramEndpoints:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("src.webhook.relay.httpx.AsyncClient") as mock_fwd_cls, \
-                 patch("src.webhook.telegram.httpx.AsyncClient") as mock_tg_cls:
-                mock_fwd = AsyncMock()
-                mock_resp = MagicMock()
-                mock_resp.status_code = 200
-                mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
-                mock_resp.text = "ok"
-                mock_fwd.post.return_value = mock_resp
-                mock_fwd.__aenter__ = AsyncMock(return_value=mock_fwd)
-                mock_fwd.__aexit__ = AsyncMock(return_value=False)
-                mock_fwd_cls.return_value = mock_fwd
-
-                mock_tg = AsyncMock()
-                mock_tg.post.return_value = MagicMock(status_code=200)
-                mock_tg.__aenter__ = AsyncMock(return_value=mock_tg)
-                mock_tg.__aexit__ = AsyncMock(return_value=False)
-                mock_tg_cls.return_value = mock_tg
-
+            # B2: patch at method level — pooled clients exist before patching window
+            with patch(
+                "src.webhook.relay.WebhookRelayPipeline._forward_to_upstream",
+                new_callable=AsyncMock,
+                return_value=WebhookResponse(text="ok", status_code=200),
+            ), patch(
+                "src.webhook.telegram.TelegramRelay.send_response",
+                new_callable=AsyncMock,
+            ):
                 # Send requests up to the limit
                 for i in range(2):
                     resp = await client.post(
@@ -328,8 +316,11 @@ class TestTelegramEndpoints:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             # build_attachments fails for all files → returns []
             # send_response is mocked to capture the error message
-            with patch("src.webhook.telegram.TelegramRelay.build_attachments", new_callable=AsyncMock) as mock_build, \
-                 patch("src.webhook.telegram.TelegramRelay.send_response", new_callable=AsyncMock) as mock_send:
+            _tg = "src.webhook.telegram.TelegramRelay"
+            with (
+                patch(f"{_tg}.build_attachments", new_callable=AsyncMock) as mock_build,
+                patch(f"{_tg}.send_response", new_callable=AsyncMock) as mock_send,
+            ):
                 mock_build.return_value = []
 
                 resp = await client.post(
@@ -463,10 +454,14 @@ class TestWhatsAppEndpoints:
             assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_whatsapp_replay_attack_409(
+    async def test_whatsapp_replay_attack_deduplicated(
         self, app_with_whatsapp: Any,
     ) -> None:
-        """Old timestamp -> 409 (FR-3.7)."""
+        """Old timestamp is silently deduplicated with 200 (FR-3.7).
+
+        WhatsApp requires 200 OK for all webhook deliveries. The response
+        body identifies the deduplication via the "Duplicate update" message.
+        """
         old_timestamp = str(int(time.time()) - 400)
         payload = _make_whatsapp_payload(timestamp=old_timestamp)
         body = json.dumps(payload).encode()
@@ -481,4 +476,5 @@ class TestWhatsAppEndpoints:
                     "x-hub-signature-256": sig,
                 },
             )
-            assert resp.status_code == 409
+            assert resp.status_code == 200
+            assert resp.json().get("message") == "Duplicate update"

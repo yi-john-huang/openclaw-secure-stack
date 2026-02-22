@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_TURNS = 20  # user+assistant pairs
 _DEFAULT_SESSION_TTL_SECONDS = 24 * 3600  # 24 hours
+_EVICTION_INTERVAL_SECONDS = 60.0  # scan at most once per minute
 
 
 class ConversationHistory:
@@ -24,6 +25,9 @@ class ConversationHistory:
     Oldest messages are dropped when the history exceeds max_turns pairs.
     Sessions with no activity for longer than session_ttl_seconds are evicted
     to prevent unbounded memory growth from sender churn.
+
+    Eviction is throttled to at most once per 60 seconds to avoid O(N) scans
+    on every append.
     """
 
     def __init__(
@@ -35,6 +39,7 @@ class ConversationHistory:
         self._session_ttl = session_ttl_seconds
         self._store: dict[str, list[dict[str, str]]] = {}
         self._last_seen: dict[str, float] = {}
+        self._last_eviction: float = 0.0
 
     def get(self, session_id: str) -> list[dict[str, str]]:
         """Return a copy of the history for the given session."""
@@ -43,15 +48,15 @@ class ConversationHistory:
     def append_user(self, session_id: str, content: str) -> None:
         """Append a user message, evict stale sessions, and truncate if over the limit."""
         self._evict_stale_sessions()
-        history = self._store.setdefault(session_id, [])
-        history.append({"role": "user", "content": content})
-        self._last_seen[session_id] = time.monotonic()
-        self._truncate(session_id)
+        self._append(session_id, "user", content)
 
     def append_assistant(self, session_id: str, content: str) -> None:
         """Append an assistant message and truncate if over the limit."""
+        self._append(session_id, "assistant", content)
+
+    def _append(self, session_id: str, role: str, content: str) -> None:
         history = self._store.setdefault(session_id, [])
-        history.append({"role": "assistant", "content": content})
+        history.append({"role": role, "content": content})
         self._last_seen[session_id] = time.monotonic()
         self._truncate(session_id)
 
@@ -73,6 +78,10 @@ class ConversationHistory:
 
     def _evict_stale_sessions(self) -> None:
         now = time.monotonic()
+        # Throttle: skip if less than 60s since last eviction.
+        if now - self._last_eviction < _EVICTION_INTERVAL_SECONDS:
+            return
+        self._last_eviction = now
         stale = [
             sid for sid, ts in self._last_seen.items()
             if now - ts > self._session_ttl

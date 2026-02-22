@@ -14,6 +14,7 @@ Pipeline stages:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -38,7 +39,6 @@ logger = logging.getLogger(__name__)
 _MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB (NFR-7)
 
 
-
 def _extract_pdf_text(data: bytes, file_name: str) -> str:
     """Extract plain text from PDF bytes using pypdf.
 
@@ -60,7 +60,7 @@ def _extract_pdf_text(data: bytes, file_name: str) -> str:
         return f"[PDF: {file_name}] (could not parse)"
 
 
-def _build_content_parts(
+async def _build_content_parts(
     text: str,
     attachments: list[Attachment],
 ) -> str | list[dict[str, Any]]:
@@ -104,11 +104,11 @@ def _build_content_parts(
                 },
             })
         elif attachment.mime_type == "application/pdf":
-            # Extract text from the PDF and send as a plain text block.
-            # Sending base64 binary to OpenClaw exceeds its gateway body limit
-            # (~1MB) and results in immediate TCP-reset → 502. Extracted text
-            # is typically 10-100x smaller and works with any LLM backend.
-            pdf_text = _extract_pdf_text(attachment.data, attachment.file_name)
+            # Extract text instead of base64-encoding -- raw PDF binary exceeds
+            # the upstream gateway body limit (~1MB) and causes 502s.
+            pdf_text = await asyncio.to_thread(
+                _extract_pdf_text, attachment.data, attachment.file_name,
+            )
             parts.append({"type": "text", "text": pdf_text})
         else:
             # VIDEO and other binary formats unsupported → text placeholder
@@ -137,6 +137,8 @@ class WebhookRelayPipeline:
         response_scanner: PromptSanitizer | None = None,
         audit_logger: AuditLogger | None = None,
         conversation_history: ConversationHistory | None = None,
+        upstream_timeout: float = 120.0,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._sanitizer = sanitizer
         self._quarantine = quarantine_manager
@@ -146,6 +148,24 @@ class WebhookRelayPipeline:
         self._response_scanner = response_scanner
         self._audit = audit_logger
         self._history = conversation_history
+        self._upstream_timeout = upstream_timeout
+        if http_client is not None:
+            self._http_client = http_client
+            self._owns_client = False
+        else:
+            self._http_client = httpx.AsyncClient(
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=30,
+                )
+            )
+            self._owns_client = True
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client if we own it."""
+        if self._owns_client:
+            await self._http_client.aclose()
 
     async def relay(self, message: WebhookMessage) -> WebhookResponse:
         """Run the full relay pipeline for a webhook message."""
@@ -260,7 +280,7 @@ class WebhookRelayPipeline:
 
         # For the current (last) message, swap in the full multimodal content.
         # All prior history entries remain as text summaries.
-        current_content = _build_content_parts(clean_text, message.attachments)
+        current_content = await _build_content_parts(clean_text, message.attachments)
         messages: list[dict[str, Any]] = history_messages[:-1] + [
             {"role": "user", "content": current_content},
         ]
@@ -319,22 +339,21 @@ class WebhookRelayPipeline:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    url, json=request_body, headers=headers, timeout=30.0,
+            resp = await self._http_client.post(
+                url, json=request_body, headers=headers, timeout=self._upstream_timeout,
+            )
+            # Extract assistant message from response
+            try:
+                resp_json = resp.json()
+                text = (
+                    resp_json.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", resp.text)
                 )
-                # Extract assistant message from response
-                try:
-                    resp_json = resp.json()
-                    text = (
-                        resp_json.get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", resp.text)
-                    )
-                except (json.JSONDecodeError, IndexError, KeyError):
-                    text = resp.text
+            except (json.JSONDecodeError, IndexError, KeyError):
+                text = resp.text
 
-                return WebhookResponse(text=text, status_code=resp.status_code)
+            return WebhookResponse(text=text, status_code=resp.status_code)
         except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
             return WebhookResponse(
                 text="Upstream unavailable",

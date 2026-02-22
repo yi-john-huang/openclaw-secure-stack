@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-02-22
+
+### Added
+- **Configurable upstream timeout** (`WEBHOOK_UPSTREAM_TIMEOUT`, default 120 s) — replaces the hardcoded 30 s limit; eliminates "Upstream unavailable" errors on long LLM completions (GPT-5.2 can take 30–60+ s for complex prompts)
+- **HTTP connection pooling** — all three HTTP clients (`WebhookRelayPipeline`, `TelegramRelay`, `WhatsAppRelay`) now share persistent `httpx.AsyncClient` instances with keep-alive connections; eliminates the per-request TLS handshake overhead (~100–300 ms saved per message)
+- **Parallel Telegram file downloads** — `build_attachments()` now downloads multiple attachments concurrently via `asyncio.gather()` instead of sequentially
+- **Async PDF text extraction** — `pypdf` extraction is offloaded to a thread pool via `asyncio.to_thread()`, preventing CPU-bound work from blocking the async event loop
+- **Configurable conversation history depth** (`WEBHOOK_HISTORY_MAX_TURNS`, default 20)
+- **Graceful shutdown** — `@app.on_event("shutdown")` closes all pooled HTTP clients cleanly
+
+### Fixed
+- **WhatsApp `send_response` missing timeout** — added explicit `httpx.Timeout(connect=10 s, read=30 s, write=10 s)` to prevent hanging on slow Meta API responses
+- **Conversation history eviction O(N) per message** — eviction scan now throttled to at most once per 60 s
+
+### Changed
+- Attachment-type extraction in `TelegramRelay` is now data-driven via a lookup table (`_ATTACHMENT_TYPES`), reducing ~70 lines of repetitive if-blocks to a single loop
+
 ## [1.5.2] - 2026-02-22
 
 ### Fixed

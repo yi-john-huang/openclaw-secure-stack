@@ -287,22 +287,25 @@ def _make_attachment(
 
 
 class TestBuildContentParts:
-    """Unit tests for the _build_content_parts helper function."""
+    """Unit tests for the _build_content_parts helper function.
 
-    def test_no_attachments_returns_plain_string(self) -> None:
+    Note: _build_content_parts is async (B4 — PDF extraction runs in thread pool).
+    """
+
+    async def test_no_attachments_returns_plain_string(self) -> None:
         """Backward compatibility: text-only messages remain plain strings."""
-        result = _build_content_parts("hello world", [])
+        result = await _build_content_parts("hello world", [])
         assert result == "hello world"
         assert isinstance(result, str)
 
-    def test_image_produces_image_url_block(self) -> None:
+    async def test_image_produces_image_url_block(self) -> None:
         data = b"image bytes"
         attachment = _make_attachment(
             file_type=AttachmentType.IMAGE,
             mime_type="image/jpeg",
             data=data,
         )
-        result = _build_content_parts("look at this", [attachment])
+        result = await _build_content_parts("look at this", [attachment])
         assert isinstance(result, list)
 
         text_parts = [p for p in result if p["type"] == "text"]
@@ -313,19 +316,24 @@ class TestBuildContentParts:
         expected_b64 = base64.b64encode(data).decode()
         assert image_parts[0]["image_url"]["url"] == f"data:image/jpeg;base64,{expected_b64}"
 
-    def test_sticker_produces_image_url_block(self) -> None:
+    async def test_sticker_produces_image_url_block(self) -> None:
         attachment = _make_attachment(
             file_type=AttachmentType.STICKER,
             mime_type="image/webp",
             file_name="sticker.webp",
         )
-        result = _build_content_parts("", [attachment])
+        result = await _build_content_parts("", [attachment])
         assert isinstance(result, list)
         image_parts = [p for p in result if p["type"] == "image_url"]
         assert len(image_parts) == 1
         assert "data:image/webp;base64," in image_parts[0]["image_url"]["url"]
 
-    def test_document_produces_file_block(self) -> None:
+    async def test_pdf_produces_text_block(self) -> None:
+        """PDFs are extracted to plain text (not base64 file blocks).
+
+        Invalid/unparseable PDFs produce a placeholder text block so the LLM
+        still knows an attachment was present.
+        """
         data = b"%PDF-1.4 content"
         attachment = _make_attachment(
             file_type=AttachmentType.DOCUMENT,
@@ -333,31 +341,30 @@ class TestBuildContentParts:
             file_name="report.pdf",
             data=data,
         )
-        result = _build_content_parts("see attached", [attachment])
+        result = await _build_content_parts("see attached", [attachment])
         assert isinstance(result, list)
-        file_parts = [p for p in result if p["type"] == "file"]
-        assert len(file_parts) == 1
-        assert file_parts[0]["file"]["filename"] == "report.pdf"
-        assert file_parts[0]["file"]["content_type"] == "application/pdf"
-        assert file_parts[0]["file"]["data"] == base64.b64encode(data).decode()
+        text_parts = [p for p in result if p["type"] == "text"]
+        # There should be a text part for "see attached" and one for the PDF content
+        pdf_parts = [p for p in text_parts if "report.pdf" in p["text"]]
+        assert len(pdf_parts) == 1, "Expected one text block referencing the PDF filename"
 
-    def test_voice_produces_input_audio_block(self) -> None:
+    async def test_voice_produces_input_audio_block(self) -> None:
         attachment = _make_attachment(
             file_type=AttachmentType.VOICE,
             mime_type="audio/ogg",
             file_name="voice.ogg",
             data=b"ogg audio data",
         )
-        result = _build_content_parts("", [attachment])
+        result = await _build_content_parts("", [attachment])
         assert isinstance(result, list)
         audio_parts = [p for p in result if p["type"] == "input_audio"]
         assert len(audio_parts) == 1
         assert audio_parts[0]["input_audio"]["format"] == "ogg"
 
-    def test_text_only_part_omitted_when_empty(self) -> None:
+    async def test_text_only_part_omitted_when_empty(self) -> None:
         """No text part emitted when text is empty (file-only message)."""
         attachment = _make_attachment()
-        result = _build_content_parts("", [attachment])
+        result = await _build_content_parts("", [attachment])
         assert isinstance(result, list)
         text_parts = [p for p in result if p["type"] == "text"]
         assert len(text_parts) == 0
@@ -455,8 +462,6 @@ class TestAttachmentFilenameInjection:
     @pytest.mark.asyncio
     async def test_clean_filename_included_in_history(self) -> None:
         """Safe filename passes through and appears in history summary."""
-        from src.sanitizer.sanitizer import PromptInjectionError
-
         history = MagicMock()
         history.get.return_value = [{"role": "user", "content": "doc [document: report.pdf]"}]
         sanitizer = MagicMock()

@@ -24,6 +24,16 @@ _MAX_RETRIES = 3
 _BACKOFF_CAP_SECONDS = 30
 _MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB Telegram file size limit
 
+# (message_key, AttachmentType, default_mime, default_file_name)
+_ATTACHMENT_TYPES: list[tuple[str, AttachmentType, str, str]] = [
+    ("photo", AttachmentType.IMAGE, "image/jpeg", "photo.jpg"),
+    ("document", AttachmentType.DOCUMENT, "application/octet-stream", "document"),
+    ("audio", AttachmentType.AUDIO, "audio/mpeg", "audio.mp3"),
+    ("voice", AttachmentType.VOICE, "audio/ogg", "voice.ogg"),
+    ("video", AttachmentType.VIDEO, "video/mp4", "video.mp4"),
+    ("sticker", AttachmentType.STICKER, "image/webp", "sticker.webp"),
+]
+
 
 @dataclass
 class TelegramFileInfo:
@@ -49,9 +59,32 @@ class TelegramExtraction:
 class TelegramRelay:
     """Handles Telegram Bot API webhook updates."""
 
-    def __init__(self, bot_token: str) -> None:
+    def __init__(
+        self,
+        bot_token: str,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._bot_token = bot_token
         self._secret_hash = hashlib.sha256(bot_token.encode()).hexdigest()
+        if http_client is not None:
+            self._http_client = http_client
+            self._owns_client = False
+        else:
+            # verify=True enforces NFR-9 (TLS certificate verification).
+            self._http_client = httpx.AsyncClient(
+                verify=True,
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                    keepalive_expiry=30,
+                ),
+            )
+            self._owns_client = True
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client if we own it."""
+        if self._owns_client:
+            await self._http_client.aclose()
 
     def verify_webhook(self, headers: dict[str, str]) -> bool:
         """Verify Telegram webhook using secret token header.
@@ -91,71 +124,19 @@ class TelegramRelay:
         """Extract file metadata from all attachment types in a message."""
         infos: list[TelegramFileInfo] = []
 
-        # Photos: array of sizes; pick the last (largest) one
-        photos = message.get("photo")
-        if photos:
-            photo = photos[-1]
+        for key, file_type, default_mime, default_name in _ATTACHMENT_TYPES:
+            obj = message.get(key)
+            if not obj:
+                continue
+            # Photos: array of sizes; pick the last (largest) one
+            if key == "photo":
+                obj = obj[-1]
             infos.append(TelegramFileInfo(
-                file_id=photo["file_id"],
-                file_type=AttachmentType.IMAGE,
-                mime_type="image/jpeg",
-                file_name="photo.jpg",
-                file_size=photo.get("file_size", 0),
-            ))
-
-        # Document (PDF, ZIP, etc.)
-        doc = message.get("document")
-        if doc:
-            infos.append(TelegramFileInfo(
-                file_id=doc["file_id"],
-                file_type=AttachmentType.DOCUMENT,
-                mime_type=doc.get("mime_type", "application/octet-stream"),
-                file_name=doc.get("file_name", "document"),
-                file_size=doc.get("file_size", 0),
-            ))
-
-        # Audio file
-        audio = message.get("audio")
-        if audio:
-            infos.append(TelegramFileInfo(
-                file_id=audio["file_id"],
-                file_type=AttachmentType.AUDIO,
-                mime_type=audio.get("mime_type", "audio/mpeg"),
-                file_name=audio.get("file_name", "audio.mp3"),
-                file_size=audio.get("file_size", 0),
-            ))
-
-        # Voice message (OGG/Opus)
-        voice = message.get("voice")
-        if voice:
-            infos.append(TelegramFileInfo(
-                file_id=voice["file_id"],
-                file_type=AttachmentType.VOICE,
-                mime_type=voice.get("mime_type", "audio/ogg"),
-                file_name="voice.ogg",
-                file_size=voice.get("file_size", 0),
-            ))
-
-        # Video
-        video = message.get("video")
-        if video:
-            infos.append(TelegramFileInfo(
-                file_id=video["file_id"],
-                file_type=AttachmentType.VIDEO,
-                mime_type=video.get("mime_type", "video/mp4"),
-                file_name=video.get("file_name", "video.mp4"),
-                file_size=video.get("file_size", 0),
-            ))
-
-        # Sticker (WebP)
-        sticker = message.get("sticker")
-        if sticker:
-            infos.append(TelegramFileInfo(
-                file_id=sticker["file_id"],
-                file_type=AttachmentType.STICKER,
-                mime_type="image/webp",
-                file_name="sticker.webp",
-                file_size=sticker.get("file_size", 0),
+                file_id=obj["file_id"],
+                file_type=file_type,
+                mime_type=obj.get("mime_type", default_mime),
+                file_name=obj.get("file_name", default_name),
+                file_size=obj.get("file_size", 0),
             ))
 
         return infos
@@ -167,9 +148,9 @@ class TelegramRelay:
         1. GET /bot{token}/getFile?file_id=... → get file_path
         2. GET /file/bot{token}/{file_path} → download bytes
 
-        Security: TLS verification enabled, 20MB size cap enforced both
-        pre-download (via metadata) and post-download (on actual bytes).
-        URLs are constructed from hardcoded api.telegram.org only — no SSRF risk.
+        Security: TLS verification enabled (set on shared client), 20MB size cap
+        enforced both pre-download (via metadata) and post-download (on actual bytes).
+        URLs are constructed from hardcoded api.telegram.org only -- no SSRF risk.
         """
         get_file_url = (
             f"https://api.telegram.org/bot{self._bot_token}/getFile"
@@ -179,35 +160,35 @@ class TelegramRelay:
         # Use generous timeouts: 10s connect for API metadata, 120s read for
         # binary download (20MB file on a slow link can take tens of seconds).
         timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
-        async with httpx.AsyncClient(verify=True, timeout=timeout) as client:
-            resp = await client.get(get_file_url)
-            resp.raise_for_status()
-            data = resp.json()
 
-            if not data.get("ok"):
-                raise ValueError(f"Telegram getFile returned not-ok: {data}")
+        resp = await self._http_client.get(get_file_url, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
 
-            file_path = data["result"]["file_path"]
-            file_size = data["result"].get("file_size", 0)
+        if not data.get("ok"):
+            raise ValueError(f"Telegram getFile returned not-ok: {data}")
 
-            if file_size > _MAX_FILE_SIZE:
-                raise ValueError(
-                    f"File too large: {file_size} bytes (max {_MAX_FILE_SIZE})"
-                )
+        file_path = data["result"]["file_path"]
+        file_size = data["result"].get("file_size", 0)
 
-            download_url = (
-                f"https://api.telegram.org/file/bot{self._bot_token}/{file_path}"
+        if file_size > _MAX_FILE_SIZE:
+            raise ValueError(
+                f"File too large: {file_size} bytes (max {_MAX_FILE_SIZE})"
             )
-            file_resp = await client.get(download_url)
-            file_resp.raise_for_status()
 
-            content = file_resp.content
-            if len(content) > _MAX_FILE_SIZE:
-                raise ValueError(
-                    f"Downloaded file too large: {len(content)} bytes (max {_MAX_FILE_SIZE})"
-                )
+        download_url = (
+            f"https://api.telegram.org/file/bot{self._bot_token}/{file_path}"
+        )
+        file_resp = await self._http_client.get(download_url, timeout=timeout)
+        file_resp.raise_for_status()
 
-            return content
+        content = file_resp.content
+        if len(content) > _MAX_FILE_SIZE:
+            raise ValueError(
+                f"Downloaded file too large: {len(content)} bytes (max {_MAX_FILE_SIZE})"
+            )
+
+        return content
 
     async def build_attachments(
         self,
@@ -215,23 +196,22 @@ class TelegramRelay:
         audit_logger: Any = None,
         sender_id: str = "",
     ) -> list[Attachment]:
-        """Download all files and return as Attachment list.
+        """Download all files concurrently and return as Attachment list.
 
-        Failures are logged as warnings and skipped — one bad file does not
-        prevent the rest of the message from being processed.
+        Uses asyncio.gather() so multiple files download in parallel.
+        Failures are logged and skipped -- one bad file does not block the rest.
         """
-        attachments: list[Attachment] = []
-        for info in file_infos:
+        async def _download_one(info: TelegramFileInfo) -> Attachment | None:
             try:
                 data = await self.download_file(info.file_id)
-                attachments.append(Attachment(
+                attachment = Attachment(
                     type=info.file_type,
                     file_id=info.file_id,
                     mime_type=info.mime_type,
                     file_name=info.file_name,
                     file_size=len(data),
                     data=data,
-                ))
+                )
                 if audit_logger:
                     from src.models import AuditEvent
                     audit_logger.log(AuditEvent(
@@ -247,6 +227,7 @@ class TelegramRelay:
                             "sender_id": sender_id,
                         },
                     ))
+                return attachment
             except Exception:
                 logger.warning(
                     "Failed to download Telegram file %s (%s), skipping",
@@ -254,8 +235,10 @@ class TelegramRelay:
                     info.file_type.value,
                     exc_info=True,
                 )
+                return None
 
-        return attachments
+        results = await asyncio.gather(*(_download_one(info) for info in file_infos))
+        return [a for a in results if a is not None]
 
     def to_openclaw_request(self, text: str, chat_id: int) -> dict[str, Any]:
         """Translate Telegram message to OpenAI-compatible format (FR-2.1)."""
@@ -268,24 +251,23 @@ class TelegramRelay:
     async def send_response(self, chat_id: int, text: str) -> None:
         """Send response back via Telegram Bot API.
 
-        NFR-9: TLS certificate verification enabled.
+        NFR-9: TLS certificate verification enabled (set on shared client).
         FR-2.5/FR-2.8: Retry on 429/5xx with exponential backoff capped at 30s.
         """
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
         payload = {"chat_id": chat_id, "text": text}
-
         timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-        async with httpx.AsyncClient(verify=True, timeout=timeout) as client:
-            for attempt in range(_MAX_RETRIES + 1):
-                resp = await client.post(url, json=payload)
 
-                if resp.status_code < 400:
-                    return
-                if not self._should_retry(resp.status_code):
-                    return
-                if attempt < _MAX_RETRIES:
-                    delay = min(2 ** attempt, _BACKOFF_CAP_SECONDS)
-                    await asyncio.sleep(delay)
+        for attempt in range(_MAX_RETRIES + 1):
+            resp = await self._http_client.post(url, json=payload, timeout=timeout)
+
+            if resp.status_code < 400:
+                return
+            if not self._should_retry(resp.status_code):
+                return
+            if attempt < _MAX_RETRIES:
+                delay = min(2 ** attempt, _BACKOFF_CAP_SECONDS)
+                await asyncio.sleep(delay)
 
     @staticmethod
     def _should_retry(status_code: int) -> bool:

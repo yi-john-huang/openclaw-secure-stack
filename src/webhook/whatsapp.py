@@ -31,11 +31,30 @@ class WhatsAppRelay:
         verify_token: str,
         phone_number_id: str,
         access_token: str,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._app_secret = app_secret
         self._verify_token = verify_token
         self._phone_number_id = phone_number_id
         self._access_token = access_token
+        if http_client is not None:
+            self._http_client = http_client
+            self._owns_client = False
+        else:
+            self._http_client = httpx.AsyncClient(
+                verify=True,
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=30,
+                ),
+            )
+            self._owns_client = True
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client if we own it."""
+        if self._owns_client:
+            await self._http_client.aclose()
 
     def verify_signature(self, headers: dict[str, str], body: bytes) -> bool:
         """Verify WhatsApp webhook HMAC-SHA256 signature.
@@ -111,7 +130,7 @@ class WhatsAppRelay:
     async def send_response(self, recipient_phone: str, text: str) -> None:
         """Send response back via WhatsApp Business API.
 
-        NFR-9: TLS certificate verification enabled.
+        NFR-9: TLS certificate verification enabled (set on shared client).
         FR-3.8: Retry on 429/5xx with exponential backoff capped at 30s.
         """
         url = f"{_WHATSAPP_API_BASE}/{self._phone_number_id}/messages"
@@ -122,18 +141,20 @@ class WhatsAppRelay:
             "text": {"body": text},
         }
         headers = {"Authorization": f"Bearer {self._access_token}"}
+        timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
-        async with httpx.AsyncClient(verify=True) as client:
-            for attempt in range(_MAX_RETRIES + 1):
-                resp = await client.post(url, json=payload, headers=headers)
+        for attempt in range(_MAX_RETRIES + 1):
+            resp = await self._http_client.post(
+                url, json=payload, headers=headers, timeout=timeout,
+            )
 
-                if resp.status_code < 400:
-                    return
-                if not self._should_retry(resp.status_code):
-                    return
-                if attempt < _MAX_RETRIES:
-                    delay = min(2 ** attempt, _BACKOFF_CAP_SECONDS)
-                    await asyncio.sleep(delay)
+            if resp.status_code < 400:
+                return
+            if not self._should_retry(resp.status_code):
+                return
+            if attempt < _MAX_RETRIES:
+                delay = min(2 ** attempt, _BACKOFF_CAP_SECONDS)
+                await asyncio.sleep(delay)
 
     @staticmethod
     def _should_retry(status_code: int) -> bool:

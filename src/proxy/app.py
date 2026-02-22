@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -62,6 +62,8 @@ def create_app_from_env() -> FastAPI:
     replay_db_path = os.environ.get("REPLAY_DB_PATH", "data/replay.db")
     webhook_rate_limit = int(os.environ.get("WEBHOOK_RATE_LIMIT", "60"))
     whatsapp_replay_window = int(os.environ.get("WHATSAPP_REPLAY_WINDOW_SECONDS", "300"))
+    upstream_timeout = float(os.environ.get("WEBHOOK_UPSTREAM_TIMEOUT", "120"))
+    history_max_turns = int(os.environ.get("WEBHOOK_HISTORY_MAX_TURNS", "20"))
 
     return create_app(
         upstream_url,
@@ -76,6 +78,8 @@ def create_app_from_env() -> FastAPI:
         replay_db_path=replay_db_path,
         webhook_rate_limit=webhook_rate_limit,
         whatsapp_replay_window=whatsapp_replay_window,
+        upstream_timeout=upstream_timeout,
+        history_max_turns=history_max_turns,
     )
 
 
@@ -167,6 +171,8 @@ def create_app(
     replay_db_path: str = "data/replay.db",
     webhook_rate_limit: int = 60,
     whatsapp_replay_window: int = 300,
+    upstream_timeout: float = 120.0,
+    history_max_turns: int = 20,
 ) -> FastAPI:
     """Create the proxy FastAPI app with auth, governance, and sanitization."""
     app = FastAPI(docs_url=None, redoc_url=None)
@@ -193,6 +199,8 @@ def create_app(
         replay_db_path=replay_db_path,
         webhook_rate_limit=webhook_rate_limit,
         whatsapp_replay_window=whatsapp_replay_window,
+        upstream_timeout=upstream_timeout,
+        history_max_turns=history_max_turns,
     )
 
     @app.get("/health")
@@ -322,6 +330,8 @@ def _register_webhook_routes(
     replay_db_path: str,
     webhook_rate_limit: int,
     whatsapp_replay_window: int,
+    upstream_timeout: float = 120.0,
+    history_max_turns: int = 20,
 ) -> set[str]:
     """Register webhook routes only when corresponding tokens are configured (NFR-2).
 
@@ -349,13 +359,18 @@ def _register_webhook_routes(
         governance=governance,
         response_scanner=response_scanner,
         audit_logger=audit_logger,
-        conversation_history=ConversationHistory(),
+        conversation_history=ConversationHistory(max_turns=history_max_turns),
+        upstream_timeout=upstream_timeout,
     )
+
+    # Collect all objects with .close() for graceful shutdown.
+    _closeables: list[Any] = [pipeline]
 
     if telegram_bot_token:
         from src.webhook.telegram import TelegramRelay
 
         tg_relay = TelegramRelay(bot_token=telegram_bot_token)
+        _closeables.append(tg_relay)
 
         registered_paths.add("/webhook/telegram")
 
@@ -407,7 +422,9 @@ def _register_webhook_routes(
                         source_ip=source_ip,
                         details={"source": "telegram", "update_id": extraction.update_id},
                     ))
-                return JSONResponse({"status": "ok", "message": "Duplicate update"}, status_code=200)
+                return JSONResponse(
+                    {"status": "ok", "message": "Duplicate update"}, status_code=200
+                )
 
             # Download file attachments (after replay check to avoid wasted work)
             attachments = await tg_relay.build_attachments(
@@ -481,6 +498,7 @@ def _register_webhook_routes(
             phone_number_id=whatsapp_config["phone_number_id"],
             access_token=whatsapp_config["access_token"],
         )
+        _closeables.append(wa_relay)
 
         registered_paths.add("/webhook/whatsapp")
 
@@ -556,7 +574,9 @@ def _register_webhook_routes(
                                 "timestamp": msg_data["timestamp"],
                             },
                         ))
-                    return JSONResponse({"status": "ok", "message": "Duplicate update"}, status_code=200)
+                    return JSONResponse(
+                        {"status": "ok", "message": "Duplicate update"}, status_code=200
+                    )
 
                 if not msg_data["text"]:
                     continue
@@ -594,6 +614,11 @@ def _register_webhook_routes(
                         logging.exception("Failed to send WhatsApp response")
 
             return JSONResponse({"status": "ok"}, status_code=200)
+
+    @app.on_event("shutdown")
+    async def _close_webhook_clients() -> None:
+        for closeable in _closeables:
+            await closeable.close()
 
     return registered_paths
 

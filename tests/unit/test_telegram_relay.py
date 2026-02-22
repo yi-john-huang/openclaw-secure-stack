@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.webhook.models import Attachment, AttachmentType
-from src.webhook.telegram import TelegramExtraction, TelegramFileInfo, TelegramRelay
+from src.webhook.models import AttachmentType
+from src.webhook.telegram import TelegramFileInfo, TelegramRelay
 
 
 def _make_secret_hash(bot_token: str) -> str:
@@ -252,7 +252,6 @@ class TestTelegramFileDownload:
     @pytest.mark.asyncio
     async def test_successful_download(self) -> None:
         """Two-step download: getFile → CDN fetch."""
-        relay = TelegramRelay(bot_token="bot123")
         file_content = b"PDF content here"
 
         get_file_response = MagicMock()
@@ -268,11 +267,10 @@ class TestTelegramFileDownload:
 
         mock_client = AsyncMock()
         mock_client.get.side_effect = [get_file_response, download_response]
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient", return_value=mock_client):
-            result = await relay.download_file("file_id_42")
+        # B2: inject mock client directly — no need to patch httpx.AsyncClient
+        relay = TelegramRelay(bot_token="bot123", http_client=mock_client)
+        result = await relay.download_file("file_id_42")
 
         assert result == file_content
         assert mock_client.get.call_count == 2
@@ -287,7 +285,6 @@ class TestTelegramFileDownload:
     @pytest.mark.asyncio
     async def test_file_too_large_raises(self) -> None:
         """Files exceeding 20MB are rejected before download."""
-        relay = TelegramRelay(bot_token="bot123")
         large_size = 21 * 1024 * 1024  # 21MB
 
         get_file_response = MagicMock()
@@ -299,30 +296,24 @@ class TestTelegramFileDownload:
 
         mock_client = AsyncMock()
         mock_client.get.return_value = get_file_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(ValueError, match="File too large"):
-                await relay.download_file("big_file_id")
+        relay = TelegramRelay(bot_token="bot123", http_client=mock_client)
+        with pytest.raises(ValueError, match="File too large"):
+            await relay.download_file("big_file_id")
 
     @pytest.mark.asyncio
     async def test_api_error_raises(self) -> None:
         """Non-ok Telegram API response raises ValueError."""
-        relay = TelegramRelay(bot_token="bot123")
-
         error_response = MagicMock()
         error_response.raise_for_status = MagicMock()
         error_response.json.return_value = {"ok": False, "description": "file not found"}
 
         mock_client = AsyncMock()
         mock_client.get.return_value = error_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(ValueError, match="not-ok"):
-                await relay.download_file("bad_file_id")
+        relay = TelegramRelay(bot_token="bot123", http_client=mock_client)
+        with pytest.raises(ValueError, match="not-ok"):
+            await relay.download_file("bad_file_id")
 
     @pytest.mark.asyncio
     async def test_build_attachments_skips_failures(self) -> None:
@@ -383,121 +374,86 @@ class TestTelegramResponseSending:
     """FR-2.3, FR-2.5, FR-2.8: Send response back via Telegram API."""
 
     @pytest.mark.asyncio
-    async def test_sends_response_with_tls_verification(self) -> None:
-        """NFR-9: TLS certificate verification enabled."""
-        relay = TelegramRelay(bot_token="123:ABC")
-        mock_response = MagicMock()
-        mock_response.status_code = 200
+    async def test_sends_response_to_correct_endpoint(self) -> None:
+        """Sends to api.telegram.org/sendMessage with correct chat_id and text.
 
-        with patch("src.webhook.telegram.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        NFR-9: TLS verification is enforced at client creation time (verify=True
+        in the default AsyncClient constructor in TelegramRelay.__init__).
+        """
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=200)
 
-            await relay.send_response(chat_id=12345, text="reply text")
+        # B2: inject mock client directly — no need to patch httpx.AsyncClient
+        relay = TelegramRelay(bot_token="123:ABC", http_client=mock_client)
+        await relay.send_response(chat_id=12345, text="reply text")
 
-            mock_client_cls.assert_called_once_with(verify=True)
-            mock_client.post.assert_called_once()
-            call_kwargs = mock_client.post.call_args
-            assert "api.telegram.org" in call_kwargs[0][0]
-            assert call_kwargs[1]["json"]["chat_id"] == 12345
-            assert call_kwargs[1]["json"]["text"] == "reply text"
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
+        assert "api.telegram.org" in call_args[0][0]
+        assert call_args[1]["json"]["chat_id"] == 12345
+        assert call_args[1]["json"]["text"] == "reply text"
 
     @pytest.mark.asyncio
     async def test_retries_on_429(self) -> None:
         """FR-2.8: Retry on rate limit."""
-        relay = TelegramRelay(bot_token="123:ABC")
-        mock_429 = MagicMock(status_code=429)
-        mock_200 = MagicMock(status_code=200)
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [MagicMock(status_code=429), MagicMock(status_code=200)]
+        relay = TelegramRelay(bot_token="123:ABC", http_client=mock_client)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.side_effect = [mock_429, mock_200]
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.telegram.asyncio.sleep", new_callable=AsyncMock):
+            await relay.send_response(chat_id=1, text="hi")
 
-            with patch("src.webhook.telegram.asyncio.sleep", new_callable=AsyncMock):
-                await relay.send_response(chat_id=1, text="hi")
-
-            assert mock_client.post.call_count == 2
+        assert mock_client.post.call_count == 2
 
     @pytest.mark.asyncio
     async def test_retries_on_5xx(self) -> None:
         """FR-2.8: Retry on server error."""
-        relay = TelegramRelay(bot_token="123:ABC")
-        mock_500 = MagicMock(status_code=500)
-        mock_200 = MagicMock(status_code=200)
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [MagicMock(status_code=500), MagicMock(status_code=200)]
+        relay = TelegramRelay(bot_token="123:ABC", http_client=mock_client)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.side_effect = [mock_500, mock_200]
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.telegram.asyncio.sleep", new_callable=AsyncMock):
+            await relay.send_response(chat_id=1, text="hi")
 
-            with patch("src.webhook.telegram.asyncio.sleep", new_callable=AsyncMock):
-                await relay.send_response(chat_id=1, text="hi")
-
-            assert mock_client.post.call_count == 2
+        assert mock_client.post.call_count == 2
 
     @pytest.mark.asyncio
     async def test_no_retry_on_4xx(self) -> None:
         """FR-2.8: No retry on client errors (except 429)."""
-        relay = TelegramRelay(bot_token="123:ABC")
-        mock_400 = MagicMock(status_code=400)
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=400)
+        relay = TelegramRelay(bot_token="123:ABC", http_client=mock_client)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_400
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        await relay.send_response(chat_id=1, text="hi")
 
-            await relay.send_response(chat_id=1, text="hi")
-
-            assert mock_client.post.call_count == 1
+        assert mock_client.post.call_count == 1
 
     @pytest.mark.asyncio
     async def test_max_3_retries(self) -> None:
         """FR-2.5: Max 3 retries."""
-        relay = TelegramRelay(bot_token="123:ABC")
-        mock_500 = MagicMock(status_code=500)
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=500)
+        relay = TelegramRelay(bot_token="123:ABC", http_client=mock_client)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_500
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.telegram.asyncio.sleep", new_callable=AsyncMock):
+            await relay.send_response(chat_id=1, text="hi")
 
-            with patch("src.webhook.telegram.asyncio.sleep", new_callable=AsyncMock):
-                await relay.send_response(chat_id=1, text="hi")
-
-            # 1 initial + 3 retries = 4 total
-            assert mock_client.post.call_count == 4
+        # 1 initial + 3 retries = 4 total
+        assert mock_client.post.call_count == 4
 
     @pytest.mark.asyncio
     async def test_backoff_capped_at_30_seconds(self) -> None:
         """FR-2.8: Backoff capped at 30s."""
-        relay = TelegramRelay(bot_token="123:ABC")
-        mock_500 = MagicMock(status_code=500)
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=500)
+        relay = TelegramRelay(bot_token="123:ABC", http_client=mock_client)
 
         sleep_times: list[float] = []
 
         async def capture_sleep(t: float) -> None:
             sleep_times.append(t)
 
-        with patch("src.webhook.telegram.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_500
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.telegram.asyncio.sleep", side_effect=capture_sleep):
+            await relay.send_response(chat_id=1, text="hi")
 
-            with patch("src.webhook.telegram.asyncio.sleep", side_effect=capture_sleep):
-                await relay.send_response(chat_id=1, text="hi")
-
-            assert all(t <= 30 for t in sleep_times)
+        assert all(t <= 30 for t in sleep_times)

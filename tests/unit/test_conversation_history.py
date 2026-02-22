@@ -87,10 +87,39 @@ class TestConversationHistory:
 
         time.sleep(0.05)  # wait past TTL
 
+        # B6: The first append_user above already ran eviction and set _last_eviction.
+        # Reset it so the next call can evict (simulating >60s elapsed for test speed).
+        history._last_eviction = 0.0
+
         # Trigger eviction via a new session's append_user
         history.append_user("new-user", "hi")
         assert history.get("old-user") == []  # evicted
         assert len(history.get("new-user")) == 1  # new session intact
+
+    def test_eviction_throttled_within_interval(self) -> None:
+        """B6: Eviction scan is skipped when called within 60s of last scan."""
+        import time
+
+        history = ConversationHistory(session_ttl_seconds=0.01)  # 10ms TTL
+        history.append_user("stale", "hello")
+        assert len(history.get("stale")) == 1
+
+        time.sleep(0.05)  # wait past TTL
+
+        # First append triggers eviction and sets _last_eviction to now.
+        # Second append within the interval is throttled — stale session remains
+        # only if the first append already evicted "stale" (it won't since "stale"
+        # is only stale AFTER the sleep, which happens AFTER the first eviction).
+        # For this test: create a fresh history so first append is within interval.
+        history2 = ConversationHistory(session_ttl_seconds=0.01)
+        history2._last_eviction = time.monotonic()  # pretend eviction just ran
+        history2.append_user("stale2", "hello")
+
+        time.sleep(0.05)  # wait past TTL
+
+        # Second eviction is throttled — stale2 not yet removed
+        history2.append_user("trigger", "hi")
+        assert len(history2.get("stale2")) == 1  # still present (throttled)
 
     def test_active_sessions_not_evicted(self) -> None:
         """Sessions within TTL are preserved."""
@@ -123,7 +152,9 @@ class TestWebhookRelayWithHistory:
         )
 
         msg1 = WebhookMessage(source="telegram", text="hi", sender_id="u1", metadata={})
-        msg2 = WebhookMessage(source="telegram", text="what time is it?", sender_id="u1", metadata={})
+        msg2 = WebhookMessage(
+            source="telegram", text="what time is it?", sender_id="u1", metadata={}
+        )
 
         with patch.object(pipeline, "_forward_to_upstream", new_callable=AsyncMock) as mock_fwd:
             mock_fwd.return_value = WebhookResponse(text="hello!", status_code=200)
@@ -229,8 +260,12 @@ class TestWebhookRelayWithHistory:
             conversation_history=history,
         )
 
-        tg_msg = WebhookMessage(source="telegram", text="from telegram", sender_id="12345", metadata={})
-        wa_msg = WebhookMessage(source="whatsapp", text="from whatsapp", sender_id="12345", metadata={})
+        tg_msg = WebhookMessage(
+            source="telegram", text="from telegram", sender_id="12345", metadata={}
+        )
+        wa_msg = WebhookMessage(
+            source="whatsapp", text="from whatsapp", sender_id="12345", metadata={}
+        )
 
         with patch.object(pipeline, "_forward_to_upstream", new_callable=AsyncMock) as mock_fwd:
             mock_fwd.return_value = WebhookResponse(text="ok", status_code=200)

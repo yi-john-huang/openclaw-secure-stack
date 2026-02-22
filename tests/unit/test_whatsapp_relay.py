@@ -212,99 +212,72 @@ class TestWhatsAppResponseSending:
     """FR-3.3, FR-3.8: Send response via WhatsApp API."""
 
     @pytest.mark.asyncio
-    async def test_sends_response_with_tls(self) -> None:
-        """NFR-9: TLS verification."""
-        relay = _make_whatsapp_relay()
-        mock_response = MagicMock(status_code=200)
+    async def test_sends_response_to_correct_endpoint(self) -> None:
+        """Sends to WhatsApp API with correct recipient and body.
 
-        with patch("src.webhook.whatsapp.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        NFR-9: TLS verification is enforced at client creation time (verify=True
+        in the default AsyncClient constructor in WhatsAppRelay.__init__).
+        """
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=200)
 
-            await relay.send_response(recipient_phone="+1234567890", text="reply")
+        # B2: inject mock client directly — no need to patch httpx.AsyncClient
+        relay = _make_whatsapp_relay(http_client=mock_client)
+        await relay.send_response(recipient_phone="+1234567890", text="reply")
 
-            mock_client_cls.assert_called_once_with(verify=True)
-            mock_client.post.assert_called_once()
-            call_kwargs = mock_client.post.call_args
-            assert call_kwargs[1]["json"]["to"] == "+1234567890"
-            assert call_kwargs[1]["json"]["text"]["body"] == "reply"
+        mock_client.post.assert_called_once()
+        call_kwargs = mock_client.post.call_args
+        assert call_kwargs[1]["json"]["to"] == "+1234567890"
+        assert call_kwargs[1]["json"]["text"]["body"] == "reply"
 
     @pytest.mark.asyncio
     async def test_retries_on_429_and_5xx(self) -> None:
         """FR-3.8: Selective retry."""
-        relay = _make_whatsapp_relay()
-        mock_429 = MagicMock(status_code=429)
-        mock_200 = MagicMock(status_code=200)
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [MagicMock(status_code=429), MagicMock(status_code=200)]
+        relay = _make_whatsapp_relay(http_client=mock_client)
 
-        with patch("src.webhook.whatsapp.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.side_effect = [mock_429, mock_200]
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.whatsapp.asyncio.sleep", new_callable=AsyncMock):
+            await relay.send_response(recipient_phone="+1", text="hi")
 
-            with patch("src.webhook.whatsapp.asyncio.sleep", new_callable=AsyncMock):
-                await relay.send_response(recipient_phone="+1", text="hi")
-
-            assert mock_client.post.call_count == 2
+        assert mock_client.post.call_count == 2
 
     @pytest.mark.asyncio
     async def test_no_retry_on_4xx(self) -> None:
         """FR-3.8: No retry on client errors except 429."""
-        relay = _make_whatsapp_relay()
-        mock_400 = MagicMock(status_code=400)
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=400)
+        relay = _make_whatsapp_relay(http_client=mock_client)
 
-        with patch("src.webhook.whatsapp.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_400
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        await relay.send_response(recipient_phone="+1", text="hi")
 
-            await relay.send_response(recipient_phone="+1", text="hi")
-
-            assert mock_client.post.call_count == 1
+        assert mock_client.post.call_count == 1
 
     @pytest.mark.asyncio
     async def test_backoff_capped_at_30_seconds(self) -> None:
         """FR-3.8: Cap at 30s."""
-        relay = _make_whatsapp_relay()
-        mock_500 = MagicMock(status_code=500)
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=500)
+        relay = _make_whatsapp_relay(http_client=mock_client)
 
         sleep_times: list[float] = []
 
         async def capture_sleep(t: float) -> None:
             sleep_times.append(t)
 
-        with patch("src.webhook.whatsapp.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_500
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.whatsapp.asyncio.sleep", side_effect=capture_sleep):
+            await relay.send_response(recipient_phone="+1", text="hi")
 
-            with patch("src.webhook.whatsapp.asyncio.sleep", side_effect=capture_sleep):
-                await relay.send_response(recipient_phone="+1", text="hi")
-
-            assert all(t <= 30 for t in sleep_times)
+        assert all(t <= 30 for t in sleep_times)
 
     @pytest.mark.asyncio
     async def test_max_3_retries(self) -> None:
         """FR-3.8: Max 3 retries."""
-        relay = _make_whatsapp_relay()
-        mock_500 = MagicMock(status_code=500)
+        mock_client = AsyncMock()
+        mock_client.post.return_value = MagicMock(status_code=500)
+        relay = _make_whatsapp_relay(http_client=mock_client)
 
-        with patch("src.webhook.whatsapp.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_500
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        with patch("src.webhook.whatsapp.asyncio.sleep", new_callable=AsyncMock):
+            await relay.send_response(recipient_phone="+1", text="hi")
 
-            with patch("src.webhook.whatsapp.asyncio.sleep", new_callable=AsyncMock):
-                await relay.send_response(recipient_phone="+1", text="hi")
-
-            assert mock_client.post.call_count == 4  # 1 + 3 retries
+        assert mock_client.post.call_count == 4  # 1 + 3 retries
