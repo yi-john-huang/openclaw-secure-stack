@@ -176,7 +176,10 @@ class TelegramRelay:
             f"?file_id={file_id}"
         )
 
-        async with httpx.AsyncClient(verify=True) as client:
+        # Use generous timeouts: 10s connect for API metadata, 120s read for
+        # binary download (20MB file on a slow link can take tens of seconds).
+        timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(verify=True, timeout=timeout) as client:
             resp = await client.get(get_file_url)
             resp.raise_for_status()
             data = resp.json()
