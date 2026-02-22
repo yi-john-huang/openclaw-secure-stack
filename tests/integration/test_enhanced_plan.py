@@ -209,7 +209,7 @@ def schema_config(tmp_path) -> str:
         "properties": {
             "description": {"type": "string"},
             "operations": {"type": "array"},
-            "constraints": {"type": "object"},
+            "constraints": {"oneOf": [{"type": "object"}, {"type": "array"}]},
             "recoveryPaths": {"type": "array"},
             "conditionals": {"type": "array"},
             "executionMode": {"type": "string"},
@@ -324,6 +324,7 @@ class TestPlanGeneratorEnhance:
         llm.complete = MagicMock(return_value=json.dumps({
             "description": "Agent guided plan",
             "executionMode": "agent_guided",
+            "operations": [],
             "constraints": {},
         }))
 
@@ -359,6 +360,7 @@ class TestPlanGeneratorEnhance:
         llm = MagicMock()
         llm.complete = MagicMock(return_value=json.dumps({
             "description": "Test",
+            "operations": [],
             "constraints": ["Constraint 1", "Constraint 2"],
         }))
 
@@ -378,6 +380,7 @@ class TestPlanGeneratorEnhance:
         llm.complete = MagicMock(return_value="""```json
 {
     "description": "Markdown wrapped response",
+    "operations": [],
     "constraints": {}
 }
 ```""")
@@ -412,6 +415,7 @@ class TestPlanGeneratorEnhance:
         llm = MagicMock()
         llm.complete = MagicMock(return_value=json.dumps({
             "description": "Test",
+            "operations": [],
             "constraints": {},
             "recoveryPaths": [
                 {"triggerStep": 0, "strategy": "retry"},  # Valid
@@ -437,6 +441,7 @@ class TestPlanGeneratorEnhance:
         llm = MagicMock()
         llm.complete = MagicMock(return_value=json.dumps({
             "description": "Test",
+            "operations": [],
             "constraints": {},
             "conditionals": [
                 {"condition": "valid", "ifTrue": [1]},  # Valid

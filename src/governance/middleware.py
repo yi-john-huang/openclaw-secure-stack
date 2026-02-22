@@ -92,16 +92,20 @@ class GovernanceMiddleware:
         if self._enabled:
             self._classifier = IntentClassifier(patterns_path)
 
-            # Resolve schema path to absolute path
+            # Resolve schema path - prefer explicit absolute path from settings,
+            # fall back to same directory as patterns_path (typically config/)
             enhancement_settings = settings.get("enhancement", {})
-            schema_path = enhancement_settings.get(
-                "schema_path",
-                "config/execution-plan.json"
-            )
-            # Make absolute relative to patterns_path parent directory
-            if not Path(schema_path).is_absolute():
-                base_dir = Path(patterns_path).parent.parent  # Go up from config/
-                schema_path = str(base_dir / schema_path)
+            schema_path = enhancement_settings.get("schema_path")
+
+            if schema_path is None:
+                # Default: look for execution-plan.json in same dir as patterns
+                config_dir = Path(patterns_path).parent
+                schema_path = str(config_dir / "execution-plan.json")
+            elif not Path(schema_path).is_absolute():
+                # Relative path: resolve from same dir as patterns
+                config_dir = Path(patterns_path).parent
+                schema_path = str(config_dir / schema_path)
+            # else: absolute path, use as-is
 
             self._planner = PlanGenerator(patterns_path, schema_path=schema_path)
             self._validator = PolicyValidator(policy_path)

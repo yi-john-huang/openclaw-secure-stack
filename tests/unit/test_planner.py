@@ -426,85 +426,123 @@ class TestFullGeneration:
 
 
 class TestSanitization:
-    """Tests for sanitizing sensitive data before LLM calls."""
+    """Tests for sanitizing data before LLM calls using allowlist approach."""
 
-    def test_sanitize_redacts_password(self, planner):
-        """Test password fields are redacted."""
-        data = {"username": "admin", "password": "secret123"}
-        result = planner._sanitize_for_llm(data)
-        assert result["username"] == "admin"
-        assert result["password"] == "[REDACTED]"
-
-    def test_sanitize_redacts_api_key(self, planner):
-        """Test api_key fields are redacted."""
-        data = {"api_key": "sk-12345", "endpoint": "https://api.example.com"}
-        result = planner._sanitize_for_llm(data)
-        assert result["api_key"] == "[REDACTED]"
-        assert result["endpoint"] == "https://api.example.com"
-
-    def test_sanitize_redacts_token(self, planner):
-        """Test token fields are redacted."""
-        data = {"token": "bearer-xyz", "user": "john"}
-        result = planner._sanitize_for_llm(data)
-        assert result["token"] == "[REDACTED]"
-        assert result["user"] == "john"
-
-    def test_sanitize_case_insensitive(self, planner):
-        """Test redaction is case-insensitive."""
-        data = {"PASSWORD": "secret", "Token": "abc", "API_KEY": "xyz"}
-        result = planner._sanitize_for_llm(data)
-        assert result["PASSWORD"] == "[REDACTED]"
-        assert result["Token"] == "[REDACTED]"
-        assert result["API_KEY"] == "[REDACTED]"
-
-    def test_sanitize_nested_dict(self, planner):
-        """Test nested dictionaries are sanitized."""
+    def test_sanitize_allows_plan_structure_keys(self, planner):
+        """Test that plan structure keys are allowed."""
         data = {
-            "config": {
-                "database": {
-                    "password": "secret",
-                    "username": "admin",
+            "plan_id": "test-123",
+            "session_id": "sess-456",
+            "actions": [],
+            "risk_assessment": {"overall_score": 50},
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["plan_id"] == "test-123"
+        assert result["session_id"] == "sess-456"
+        assert result["actions"] == []
+        assert result["risk_assessment"]["overall_score"] == 50
+
+    def test_sanitize_redacts_unknown_keys(self, planner):
+        """Test that unknown keys are redacted (allowlist approach)."""
+        data = {
+            "plan_id": "test-123",
+            "unknown_field": "should be redacted",
+            "another_unknown": {"nested": "value"},
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["plan_id"] == "test-123"
+        assert result["unknown_field"] == "[REDACTED]"
+        assert result["another_unknown"] == "[REDACTED]"
+
+    def test_sanitize_allows_safe_argument_keys(self, planner):
+        """Test that safe argument keys are allowed inside arguments."""
+        data = {
+            "tool_call": {
+                "name": "read_file",
+                "arguments": {
+                    "path": "/tmp/file.txt",
+                    "mode": "read",
+                    "encoding": "utf-8",
                 }
             }
         }
         result = planner._sanitize_for_llm(data)
-        assert result["config"]["database"]["password"] == "[REDACTED]"
-        assert result["config"]["database"]["username"] == "admin"
+        assert result["tool_call"]["arguments"]["path"] == "/tmp/file.txt"
+        assert result["tool_call"]["arguments"]["mode"] == "read"
+        assert result["tool_call"]["arguments"]["encoding"] == "utf-8"
 
-    def test_sanitize_list_of_dicts(self, planner):
-        """Test lists containing dicts are sanitized."""
+    def test_sanitize_redacts_sensitive_argument_keys(self, planner):
+        """Test that sensitive keys in arguments are redacted."""
         data = {
-            "connections": [
-                {"service": "db", "password": "pass1"},
-                {"service": "api", "token": "tok1"},
+            "tool_call": {
+                "name": "api_call",
+                "arguments": {
+                    "path": "/tmp/file.txt",  # safe - in SAFE_ARGUMENT_KEYS
+                    "api_key": "sk-secret",   # not safe - redacted
+                    "password": "secret123",  # not safe - redacted
+                    "token": "bearer-xyz",    # not safe - redacted
+                }
+            }
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["tool_call"]["arguments"]["path"] == "/tmp/file.txt"
+        assert result["tool_call"]["arguments"]["api_key"] == "[REDACTED]"
+        assert result["tool_call"]["arguments"]["password"] == "[REDACTED]"
+        assert result["tool_call"]["arguments"]["token"] == "[REDACTED]"
+
+    def test_sanitize_nested_actions(self, planner):
+        """Test sanitization of nested action structures."""
+        data = {
+            "actions": [
+                {
+                    "sequence": 0,
+                    "tool_call": {
+                        "name": "read_file",
+                        "arguments": {
+                            "path": "/tmp/test.txt",
+                            "secret_key": "should-redact",
+                        }
+                    },
+                    "category": "file_read",
+                    "risk_score": 10,
+                }
             ]
         }
         result = planner._sanitize_for_llm(data)
-        assert result["connections"][0]["password"] == "[REDACTED]"
-        assert result["connections"][1]["token"] == "[REDACTED]"
-        assert result["connections"][0]["service"] == "db"
+        action = result["actions"][0]
+        assert action["sequence"] == 0
+        assert action["tool_call"]["name"] == "read_file"
+        assert action["tool_call"]["arguments"]["path"] == "/tmp/test.txt"
+        assert action["tool_call"]["arguments"]["secret_key"] == "[REDACTED]"
+        assert action["category"] == "file_read"
+        assert action["risk_score"] == 10
 
-    def test_sanitize_preserves_non_sensitive(self, planner):
-        """Test non-sensitive fields are preserved."""
-        data = {"path": "/tmp/file.txt", "mode": "read", "size": 1024}
+    def test_sanitize_preserves_resources(self, planner):
+        """Test that resource fields are preserved."""
+        data = {
+            "resources": [
+                {"type": "file", "path": "/tmp/test.txt", "operation": "read"}
+            ]
+        }
         result = planner._sanitize_for_llm(data)
-        assert result == data
+        assert result["resources"][0]["type"] == "file"
+        assert result["resources"][0]["path"] == "/tmp/test.txt"
+        assert result["resources"][0]["operation"] == "read"
 
     def test_count_redacted_fields(self, planner):
         """Test counting redacted fields."""
         data = {
-            "password": "[REDACTED]",
-            "token": "[REDACTED]",
-            "nested": {"api_key": "[REDACTED]"},
-            "list": [{"secret": "[REDACTED]"}],
-            "normal": "value",
+            "plan_id": "test",
+            "unknown1": "[REDACTED]",
+            "unknown2": "[REDACTED]",
+            "actions": [{"secret": "[REDACTED]"}],
         }
         count = planner._count_redacted_fields(data)
-        assert count == 4
+        assert count == 3
 
     def test_count_redacted_empty(self, planner):
         """Test counting with no redacted fields."""
-        data = {"name": "test", "value": 123}
+        data = {"plan_id": "test", "session_id": "sess"}
         count = planner._count_redacted_fields(data)
         assert count == 0
 
@@ -641,9 +679,9 @@ class TestEnhanceSecurityAudit:
                     tool_call=ToolCall(
                         name="db_connect",
                         arguments={
-                            "host": "localhost",
-                            "password": "dbpass",
-                            "token": "auth-token",
+                            "path": "/tmp/db.sock",  # safe - in SAFE_ARGUMENT_KEYS
+                            "password": "dbpass",    # not safe - redacted
+                            "token": "auth-token",   # not safe - redacted
                         },
                     ),
                     category=IntentCategory.NETWORK_REQUEST,
@@ -668,5 +706,5 @@ class TestEnhanceSecurityAudit:
         # Find the audit log message
         audit_logs = [r for r in caplog.records if "SECURITY_AUDIT" in r.message]
         assert len(audit_logs) == 1
-        # Should mention fields_redacted=2 (password and token)
+        # Should mention fields_redacted=2 (password and token - path is safe)
         assert "fields_redacted=2" in audit_logs[0].message

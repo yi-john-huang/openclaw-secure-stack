@@ -308,3 +308,167 @@ class TestEvaluationResult:
         assert hasattr(result, "violations")
         assert hasattr(result, "session_id")
         assert result.decision == GovernanceDecision.ALLOW
+
+
+class TestSchemaPathResolution:
+    """Tests for schema path resolution in middleware initialization."""
+
+    def test_schema_path_default_same_dir_as_patterns(self, tmp_path, secret):
+        """Test that default schema path is in same directory as patterns."""
+        from src.governance.middleware import GovernanceMiddleware
+
+        # Create config files in a config directory
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        patterns_file = config_dir / "intent-patterns.json"
+        patterns_file.write_text(json.dumps({
+            "tool_categories": {},
+            "argument_patterns": {},
+            "risk_multipliers": {},
+        }))
+
+        policy_file = config_dir / "policies.json"
+        policy_file.write_text(json.dumps([]))
+
+        schema_file = config_dir / "execution-plan.json"
+        schema_file.write_text(json.dumps({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {"description": {"type": "string"}},
+        }))
+
+        db_path = str(tmp_path / "test.db")
+
+        middleware = GovernanceMiddleware(
+            db_path=db_path,
+            secret=secret,
+            policy_path=str(policy_file),
+            patterns_path=str(patterns_file),
+            settings={"enabled": True},
+        )
+
+        # Planner should have loaded the schema from same dir as patterns
+        assert middleware._planner._schema is not None
+
+    def test_schema_path_explicit_absolute(self, tmp_path, secret):
+        """Test that explicit absolute schema path is used as-is."""
+        from src.governance.middleware import GovernanceMiddleware
+
+        # Create config files
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        patterns_file = config_dir / "intent-patterns.json"
+        patterns_file.write_text(json.dumps({
+            "tool_categories": {},
+            "argument_patterns": {},
+            "risk_multipliers": {},
+        }))
+
+        policy_file = config_dir / "policies.json"
+        policy_file.write_text(json.dumps([]))
+
+        # Schema in a completely different directory
+        other_dir = tmp_path / "other"
+        other_dir.mkdir()
+        schema_file = other_dir / "my-schema.json"
+        schema_file.write_text(json.dumps({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {"description": {"type": "string"}},
+        }))
+
+        db_path = str(tmp_path / "test.db")
+
+        middleware = GovernanceMiddleware(
+            db_path=db_path,
+            secret=secret,
+            policy_path=str(policy_file),
+            patterns_path=str(patterns_file),
+            settings={
+                "enabled": True,
+                "enhancement": {
+                    "schema_path": str(schema_file),  # Absolute path
+                },
+            },
+        )
+
+        # Planner should have loaded the schema from explicit path
+        assert middleware._planner._schema is not None
+
+    def test_schema_path_relative_resolved_from_patterns_dir(self, tmp_path, secret):
+        """Test that relative schema path is resolved from patterns directory."""
+        from src.governance.middleware import GovernanceMiddleware
+
+        # Create config files
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        patterns_file = config_dir / "intent-patterns.json"
+        patterns_file.write_text(json.dumps({
+            "tool_categories": {},
+            "argument_patterns": {},
+            "risk_multipliers": {},
+        }))
+
+        policy_file = config_dir / "policies.json"
+        policy_file.write_text(json.dumps([]))
+
+        # Schema with different name in same dir
+        schema_file = config_dir / "custom-schema.json"
+        schema_file.write_text(json.dumps({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {"description": {"type": "string"}},
+        }))
+
+        db_path = str(tmp_path / "test.db")
+
+        middleware = GovernanceMiddleware(
+            db_path=db_path,
+            secret=secret,
+            policy_path=str(policy_file),
+            patterns_path=str(patterns_file),
+            settings={
+                "enabled": True,
+                "enhancement": {
+                    "schema_path": "custom-schema.json",  # Relative path
+                },
+            },
+        )
+
+        # Planner should have loaded the schema
+        assert middleware._planner._schema is not None
+
+    def test_schema_path_missing_file_handled(self, tmp_path, secret):
+        """Test that missing schema file results in None schema."""
+        from src.governance.middleware import GovernanceMiddleware
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        patterns_file = config_dir / "intent-patterns.json"
+        patterns_file.write_text(json.dumps({
+            "tool_categories": {},
+            "argument_patterns": {},
+            "risk_multipliers": {},
+        }))
+
+        policy_file = config_dir / "policies.json"
+        policy_file.write_text(json.dumps([]))
+
+        # No schema file created
+
+        db_path = str(tmp_path / "test.db")
+
+        middleware = GovernanceMiddleware(
+            db_path=db_path,
+            secret=secret,
+            policy_path=str(policy_file),
+            patterns_path=str(patterns_file),
+            settings={"enabled": True},
+        )
+
+        # Planner should have None schema (file doesn't exist)
+        assert middleware._planner._schema is None
