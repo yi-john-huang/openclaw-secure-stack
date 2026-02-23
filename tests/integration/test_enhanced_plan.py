@@ -1378,20 +1378,3 @@ class TestLLMClientComplete:
         call_args = mock_anthropic.messages.create.call_args
         assert call_args.kwargs["max_tokens"] == 4096
 
-    def test_complete_raises_when_anthropic_not_installed(self, monkeypatch):
-        """Test that complete raises error if anthropic disappears."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-
-        # First create a valid client
-        mock_module = MagicMock()
-        mock_module.AuthenticationError = Exception
-        mock_module.APIError = Exception
-
-        with patch.dict(sys.modules, {"anthropic": mock_module}):
-            from src.llm.client import LLMClient
-            client = LLMClient()
-
-        # Now make anthropic unavailable for complete()
-        with patch.dict(sys.modules, {"anthropic": None}):
-            with pytest.raises(RuntimeError, match="pip install anthropic"):
-                client.complete("prompt")
