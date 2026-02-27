@@ -225,11 +225,16 @@ class GovernanceMiddleware:
         # Optionally create enhanced plan (currently not persisted)
         # Fire-and-forget: runs in thread pool to avoid blocking event loop
         if self._enhancement_enabled:
-            asyncio.create_task(
-                asyncio.to_thread(
-                    self.create_enhanced_plan, plan, effective_session_id, user_id, token
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    asyncio.to_thread(
+                        self.create_enhanced_plan, plan, effective_session_id, user_id, token
+                    )
                 )
-            )
+            except RuntimeError:
+                # No running event loop (sync context) - skip enhancement
+                logger.debug("Skipping async enhancement: no running event loop")
 
         # Record in session if enabled
         if self._session_enabled:
