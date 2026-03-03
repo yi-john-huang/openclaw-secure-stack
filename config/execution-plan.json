@@ -1,0 +1,221 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "EnhancedExecutionPlan",
+	"type": "object",
+	"required": [
+		"planId",
+		"intent",
+		"operations",
+		"constraints"
+	],
+	"properties": {
+		"version": {
+			"type": "string",
+			"default": "1.0.0"
+		},
+		"planId": {
+			"type": "string",
+			"description": "Unique plan identifier (system-generated)"
+		},
+		"sessionId": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "Session identifier for multi-turn tracking"
+		},
+		"description": {
+			"type": "string",
+			"description": "Human-readable summary of what the plan does"
+		},
+		"intent": {
+			"type": "object",
+			"properties": {
+				"userMessage": {
+					"type": "string"
+				},
+				"category": {
+					"type": "string",
+					"enum": [
+						"file_read",
+						"file_write",
+						"file_delete",
+						"network_request",
+						"code_execution",
+						"mixed"
+					]
+				},
+				"riskLevel": {
+					"type": "string",
+					"enum": [
+						"info",
+						"low",
+						"medium",
+						"high",
+						"critical"
+					]
+				}
+			}
+		},
+		"operations": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": [
+					"id",
+					"tool",
+					"allow"
+				],
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"tool": {
+						"type": "string"
+					},
+					"arguments": {
+						"type": "object"
+					},
+					"allow": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Allowed argument patterns"
+					},
+					"deny": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Denied argument patterns"
+					},
+					"requires": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Required conditions before execution"
+					},
+					"parallel": {
+						"type": "boolean",
+						"default": false
+					},
+					"maxInvocations": {
+						"type": "integer",
+						"default": 1
+					},
+					"requiresConfirmation": {
+						"type": "boolean",
+						"default": false
+					}
+				}
+			}
+		},
+		"constraints": {
+			"type": "object",
+			"properties": {
+				"allowUnplanned": {
+					"type": "boolean",
+					"default": false
+				},
+				"requireSequential": {
+					"type": "boolean",
+					"default": false
+				},
+				"maxTotalOperations": {
+					"type": "integer"
+				},
+				"maxDurationMs": {
+					"type": "integer"
+				}
+			}
+		},
+		"recoveryPaths": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": [
+					"triggerStep",
+					"strategy"
+				],
+				"properties": {
+					"triggerStep": {
+						"type": "integer"
+					},
+					"triggerErrors": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"strategy": {
+						"type": "string",
+						"enum": [
+							"retry",
+							"skip",
+							"fail_fast",
+							"alternative",
+							"replan"
+						]
+					},
+					"maxRetries": {
+						"type": "integer",
+						"default": 3
+					},
+					"backoffMs": {
+						"type": "integer",
+						"default": 1000
+					}
+				}
+			}
+		},
+		"conditionals": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": [
+					"condition"
+				],
+				"properties": {
+					"condition": {
+						"type": "string"
+					},
+					"ifTrue": {
+						"type": "array",
+						"items": {
+							"type": "integer"
+						}
+					},
+					"ifFalse": {
+						"type": "array",
+						"items": {
+							"type": "integer"
+						}
+					}
+				}
+			}
+		},
+		"executionMode": {
+			"type": "string",
+			"enum": [
+				"governance_driven",
+				"agent_guided"
+			],
+			"default": "governance_driven"
+		},
+		"metadata": {
+			"type": "object",
+			"properties": {
+				"generatedBy": {
+					"type": "string"
+				},
+				"qualityScore": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 100
+				}
+			}
+		}
+	}
+}

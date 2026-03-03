@@ -11,7 +11,9 @@ This module defines all data models for the governance layer including:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -231,3 +233,241 @@ class Session(BaseModel):
     last_activity: str
     action_count: int = Field(ge=0)
     risk_accumulator: int = Field(ge=0)
+
+
+class ExecutionMode(str, Enum):
+    """How the plan should be executed."""
+
+    # Governance drives execution, calls tools directly
+    GOVERNANCE_DRIVEN = "governance_driven"
+
+    # Plan is injected into LLM context, LLM executes
+    AGENT_GUIDED = "agent_guided"
+
+    # Hybrid: governance executes, LLM consulted for decisions
+    HYBRID = "hybrid"
+
+
+class StepStatus(str, Enum):
+    """Status of a single execution step."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    BLOCKED = "blocked"  # Blocked by governance
+    AWAITING_APPROVAL = "awaiting_approval"
+    RECOVERED = "recovered"  # Failed but recovered
+
+
+class RecoveryStrategy(str, Enum):
+    """Strategy for handling step failures."""
+
+    FAIL_FAST = "fail_fast"  # Stop execution immediately
+    RETRY = "retry"  # Retry the same step
+    SKIP = "skip"  # Skip and continue
+    ALTERNATIVE = "alternative"  # Try alternative step
+    REPLAN = "replan"  # Generate new sub-plan
+    HUMAN_INTERVENTION = "human_intervention"  # Wait for human
+
+
+class StepResult(BaseModel):
+    """Outcome of executing a single step."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sequence: int = Field(ge=0)
+    status: StepStatus
+    started_at: str
+    completed_at: str | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+
+    # Tool execution details
+    tool_name: str
+    tool_args: dict[str, Any]
+    tool_result: Any | None = None
+    error: str | None = None
+
+    # Governance checks
+    governance_decision: GovernanceDecision | None = None
+    governance_reason: str | None = None
+
+    # Recovery details
+    retry_count: int = Field(default=0, ge=0)
+    recovery_action: RecoveryStrategy | None = None
+
+
+class ExecutionContext(BaseModel):
+    """Runtime context passed through execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    plan_id: str
+    session_id: str
+    user_id: str
+    token: str
+
+    # Execution configuration
+    mode: ExecutionMode = ExecutionMode.GOVERNANCE_DRIVEN
+    max_retries: int = Field(default=3, ge=0)
+    timeout_seconds: int = Field(default=300, ge=1)
+    fail_on_governance_block: bool = True
+
+    # User-provided operational knowledge
+    constraints: list[str] = Field(default_factory=list)
+    preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConditionalBranch(BaseModel):
+    """Conditional execution branch."""
+
+    model_config = ConfigDict(frozen=True)
+
+    condition: str  # Expression to evaluate
+    if_true: list[int] = Field(default_factory=list)  # Step sequences to run if true
+    if_false: list[int] = Field(default_factory=list)  # Step sequences to run if false
+
+
+class RecoveryPath(BaseModel):
+    """Recovery path for a failed step."""
+
+    model_config = ConfigDict(frozen=True)
+
+    trigger_step: int  # Which step this recovers from
+    trigger_errors: list[str] = Field(default_factory=list)  # Error patterns that trigger this
+    strategy: RecoveryStrategy
+
+    # For RETRY strategy
+    max_retries: int = Field(default=3, ge=1)
+    backoff_ms: int = Field(default=1000, ge=0)
+
+    # For ALTERNATIVE strategy
+    alternative_steps: list[PlannedAction] = Field(default_factory=list)
+
+    # For REPLAN strategy
+    replan_constraints: list[str] = Field(default_factory=list)
+
+
+class ExecutionState(BaseModel):
+    """Full state machine for plan execution."""
+
+    plan_id: str
+    session_id: str
+    context: ExecutionContext
+
+    # Current position
+    current_sequence: int = Field(default=0, ge=0)
+    status: StepStatus = StepStatus.PENDING
+
+    # History
+    step_results: list[StepResult] = Field(default_factory=list)
+
+    # Timestamps
+    started_at: str | None = None
+    completed_at: str | None = None
+
+    # Summary
+    total_steps: int = Field(ge=0)
+    completed_steps: int = Field(default=0, ge=0)
+    failed_steps: int = Field(default=0, ge=0)
+    skipped_steps: int = Field(default=0, ge=0)
+
+    def is_complete(self) -> bool:
+        """Check if execution is complete."""
+        return self.current_sequence >= self.total_steps or self.status in (
+            StepStatus.COMPLETED,
+            StepStatus.FAILED,
+            StepStatus.BLOCKED,
+        )
+
+    def get_progress(self) -> float:
+        """Get execution progress as percentage."""
+        if self.total_steps == 0:
+            return 100.0
+        return (self.completed_steps / self.total_steps) * 100
+
+
+class EnhancedExecutionPlan(BaseModel):
+    """Execution plan enhanced with LLM-generated operational knowledge.
+
+    Wraps the base ExecutionPlan and adds:
+    - Human-readable description
+    - Constraints and preferences
+    - Recovery paths
+    - Conditional branches
+    - Execution mode configuration
+    """
+
+    # NOTE: frozen=False breaks immutability contract used by other models.
+    # This is intentional but temporary - ExecutionState is embedded in the plan
+    # for simplicity during initial development. Long-term fix: extract state
+    # to a separate mutable container held by the execution engine, then freeze
+    # this model. Deferred until plan structure stabilizes.
+    model_config = ConfigDict(frozen=False)
+
+    # Base plan (immutable spec)
+    base_plan: ExecutionPlan
+
+    # LLM-generated enhancements
+    description: str | None = None
+    constraints: list[str] = Field(default_factory=list)
+    preferences: list[str] = Field(default_factory=list)
+    recovery_paths: list[RecoveryPath] = Field(default_factory=list)
+    conditionals: list[ConditionalBranch] = Field(default_factory=list)
+    execution_mode: ExecutionMode = ExecutionMode.GOVERNANCE_DRIVEN
+
+    # Schema-derived fields
+    operations: list[dict[str, Any]] = Field(default_factory=list)
+    global_constraints: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # Runtime state (initialized when execution starts)
+    state: ExecutionState | None = None
+
+    # Convenience accessors
+    @property
+    def plan_id(self) -> str:
+        return self.base_plan.plan_id
+
+    @property
+    def session_id(self) -> str | None:
+        return self.base_plan.session_id
+
+    @property
+    def actions(self) -> list[PlannedAction]:
+        return self.base_plan.actions
+
+    @property
+    def risk_assessment(self) -> RiskAssessment:
+        return self.base_plan.risk_assessment
+
+    def initialize_state(self, session_id: str | None, user_id: str, token: str) -> None:
+        """Initialize execution state. Call before execute().
+
+        Args:
+            session_id: Session ID (required).
+            user_id: User ID.
+            token: Plan token.
+
+        Raises:
+            ValueError: If session_id is None.
+        """
+        if session_id is None:
+            raise ValueError("session_id is required for execution state initialization")
+
+        context = ExecutionContext(
+            plan_id=self.plan_id,
+            session_id=session_id,
+            user_id=user_id,
+            token=token,
+        )
+        self.state = ExecutionState(
+            plan_id=self.plan_id,
+            session_id=session_id,
+            context=context,
+            current_sequence=0,
+            status=StepStatus.PENDING,
+            total_steps=len(self.actions),
+            started_at=datetime.now(UTC).isoformat(),
+        )

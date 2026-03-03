@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -40,11 +42,35 @@ def patterns_path(tmp_path: Path) -> str:
 
 
 @pytest.fixture
+def schema_path(tmp_path: Path) -> str:
+    """Create a temporary schema file."""
+    schema = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "description": {"type": "string"},
+            "constraints": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    path = tmp_path / "execution-plan.json"
+    path.write_text(json.dumps(schema))
+    return str(path)
+
+
+@pytest.fixture
 def planner(patterns_path: str):
     """Create a PlanGenerator instance."""
     from src.governance.planner import PlanGenerator
 
     return PlanGenerator(patterns_path)
+
+
+@pytest.fixture
+def planner_with_schema(patterns_path: str, schema_path: str):
+    """Create a PlanGenerator instance with schema."""
+    from src.governance.planner import PlanGenerator
+
+    return PlanGenerator(patterns_path, schema_path=schema_path)
 
 
 class TestActionBuilding:
@@ -397,3 +423,288 @@ class TestFullGeneration:
         plan = planner.generate(intent, request_body={})
         assert plan.risk_assessment is not None
         assert plan.risk_assessment.overall_score > 0
+
+
+class TestSanitization:
+    """Tests for sanitizing data before LLM calls using allowlist approach."""
+
+    def test_sanitize_allows_plan_structure_keys(self, planner):
+        """Test that plan structure keys are allowed."""
+        data = {
+            "plan_id": "test-123",
+            "session_id": "sess-456",
+            "actions": [],
+            "risk_assessment": {"overall_score": 50},
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["plan_id"] == "test-123"
+        assert result["session_id"] == "sess-456"
+        assert result["actions"] == []
+        assert result["risk_assessment"]["overall_score"] == 50
+
+    def test_sanitize_redacts_unknown_keys(self, planner):
+        """Test that unknown keys are redacted (allowlist approach)."""
+        data = {
+            "plan_id": "test-123",
+            "unknown_field": "should be redacted",
+            "another_unknown": {"nested": "value"},
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["plan_id"] == "test-123"
+        assert result["unknown_field"] == "[REDACTED]"
+        assert result["another_unknown"] == "[REDACTED]"
+
+    def test_sanitize_allows_safe_argument_keys(self, planner):
+        """Test that safe argument keys are allowed inside arguments."""
+        data = {
+            "tool_call": {
+                "name": "read_file",
+                "arguments": {
+                    "path": "/tmp/file.txt",
+                    "mode": "read",
+                    "encoding": "utf-8",
+                }
+            }
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["tool_call"]["arguments"]["path"] == "/tmp/file.txt"
+        assert result["tool_call"]["arguments"]["mode"] == "read"
+        assert result["tool_call"]["arguments"]["encoding"] == "utf-8"
+
+    def test_sanitize_redacts_sensitive_argument_keys(self, planner):
+        """Test that sensitive keys in arguments are redacted."""
+        data = {
+            "tool_call": {
+                "name": "api_call",
+                "arguments": {
+                    "path": "/tmp/file.txt",  # safe - in SAFE_ARGUMENT_KEYS
+                    "api_key": "sk-secret",   # not safe - redacted
+                    "password": "secret123",  # not safe - redacted
+                    "token": "bearer-xyz",    # not safe - redacted
+                }
+            }
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["tool_call"]["arguments"]["path"] == "/tmp/file.txt"
+        assert result["tool_call"]["arguments"]["api_key"] == "[REDACTED]"
+        assert result["tool_call"]["arguments"]["password"] == "[REDACTED]"
+        assert result["tool_call"]["arguments"]["token"] == "[REDACTED]"
+
+    def test_sanitize_nested_actions(self, planner):
+        """Test sanitization of nested action structures."""
+        data = {
+            "actions": [
+                {
+                    "sequence": 0,
+                    "tool_call": {
+                        "name": "read_file",
+                        "arguments": {
+                            "path": "/tmp/test.txt",
+                            "secret_key": "should-redact",
+                        }
+                    },
+                    "category": "file_read",
+                    "risk_score": 10,
+                }
+            ]
+        }
+        result = planner._sanitize_for_llm(data)
+        action = result["actions"][0]
+        assert action["sequence"] == 0
+        assert action["tool_call"]["name"] == "read_file"
+        assert action["tool_call"]["arguments"]["path"] == "/tmp/test.txt"
+        assert action["tool_call"]["arguments"]["secret_key"] == "[REDACTED]"
+        assert action["category"] == "file_read"
+        assert action["risk_score"] == 10
+
+    def test_sanitize_preserves_resources(self, planner):
+        """Test that resource fields are preserved."""
+        data = {
+            "resources": [
+                {"type": "file", "path": "/tmp/test.txt", "operation": "read"}
+            ]
+        }
+        result = planner._sanitize_for_llm(data)
+        assert result["resources"][0]["type"] == "file"
+        assert result["resources"][0]["path"] == "/tmp/test.txt"
+        assert result["resources"][0]["operation"] == "read"
+
+    def test_count_redacted_fields(self, planner):
+        """Test counting redacted fields."""
+        data = {
+            "plan_id": "test",
+            "unknown1": "[REDACTED]",
+            "unknown2": "[REDACTED]",
+            "actions": [{"secret": "[REDACTED]"}],
+        }
+        count = planner._count_redacted_fields(data)
+        assert count == 3
+
+    def test_count_redacted_empty(self, planner):
+        """Test counting with no redacted fields."""
+        data = {"plan_id": "test", "session_id": "sess"}
+        count = planner._count_redacted_fields(data)
+        assert count == 0
+
+
+class TestEnhanceSecurityAudit:
+    """Tests for security audit logging during enhance()."""
+
+    def test_enhance_logs_security_audit(
+        self, planner_with_schema, caplog
+    ):
+        """Test that enhance() logs a security audit event."""
+        from src.governance.models import (
+            ExecutionPlan,
+            PlannedAction,
+            IntentCategory,
+            ToolCall,
+            RiskAssessment,
+            RiskLevel,
+        )
+
+        # Create a minimal plan
+        plan = ExecutionPlan(
+            plan_id="test-plan-123",
+            session_id="session-456",
+            request_hash="a" * 64,
+            actions=[
+                PlannedAction(
+                    sequence=0,
+                    tool_call=ToolCall(
+                        name="read_file",
+                        arguments={"path": "/tmp/test.txt", "password": "secret"},
+                    ),
+                    category=IntentCategory.FILE_READ,
+                    resources=[],
+                    risk_score=10,
+                )
+            ],
+            risk_assessment=RiskAssessment(
+                overall_score=10,
+                level=RiskLevel.LOW,
+                factors=[],
+                mitigations=[],
+            ),
+        )
+
+        # Mock LLM client
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = json.dumps({
+            "description": "Test plan",
+            "constraints": [],
+        })
+
+        with caplog.at_level(logging.INFO):
+            planner_with_schema.enhance(plan, llm=mock_llm, context={})
+
+        # Check audit log was created
+        assert any("SECURITY_AUDIT" in record.message for record in caplog.records)
+        assert any("test-plan-123" in record.message for record in caplog.records)
+
+    def test_enhance_sanitizes_before_llm_call(self, planner_with_schema):
+        """Test that sensitive data is sanitized before LLM call."""
+        from src.governance.models import (
+            ExecutionPlan,
+            PlannedAction,
+            IntentCategory,
+            ToolCall,
+            RiskAssessment,
+            RiskLevel,
+        )
+
+        plan = ExecutionPlan(
+            plan_id="test-plan",
+            session_id="session",
+            request_hash="b" * 64,
+            actions=[
+                PlannedAction(
+                    sequence=0,
+                    tool_call=ToolCall(
+                        name="api_call",
+                        arguments={
+                            "url": "https://api.example.com",
+                            "api_key": "sk-secret-key-12345",
+                            "password": "super-secret",
+                        },
+                    ),
+                    category=IntentCategory.NETWORK_REQUEST,
+                    resources=[],
+                    risk_score=20,
+                )
+            ],
+            risk_assessment=RiskAssessment(
+                overall_score=20,
+                level=RiskLevel.LOW,
+                factors=[],
+                mitigations=[],
+            ),
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = json.dumps({"description": "Test"})
+
+        planner_with_schema.enhance(plan, llm=mock_llm, context={})
+
+        # Check what was sent to LLM
+        call_args = mock_llm.complete.call_args
+        prompt = call_args.kwargs.get("prompt") or call_args.args[0]
+
+        # Sensitive values should NOT appear in the prompt
+        assert "sk-secret-key-12345" not in prompt
+        assert "super-secret" not in prompt
+        # Redacted marker should appear
+        assert "[REDACTED]" in prompt
+        # Non-sensitive values should still be there
+        assert "https://api.example.com" in prompt
+
+    def test_enhance_logs_redacted_count(self, planner_with_schema, caplog):
+        """Test that audit log includes count of redacted fields."""
+        from src.governance.models import (
+            ExecutionPlan,
+            PlannedAction,
+            IntentCategory,
+            ToolCall,
+            RiskAssessment,
+            RiskLevel,
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-with-secrets",
+            session_id="session",
+            request_hash="c" * 64,
+            actions=[
+                PlannedAction(
+                    sequence=0,
+                    tool_call=ToolCall(
+                        name="db_connect",
+                        arguments={
+                            "path": "/tmp/db.sock",  # safe - in SAFE_ARGUMENT_KEYS
+                            "password": "dbpass",    # not safe - redacted
+                            "token": "auth-token",   # not safe - redacted
+                        },
+                    ),
+                    category=IntentCategory.NETWORK_REQUEST,
+                    resources=[],
+                    risk_score=30,
+                )
+            ],
+            risk_assessment=RiskAssessment(
+                overall_score=30,
+                level=RiskLevel.MEDIUM,
+                factors=[],
+                mitigations=[],
+            ),
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = json.dumps({"description": "DB connection"})
+
+        with caplog.at_level(logging.INFO):
+            planner_with_schema.enhance(plan, llm=mock_llm, context={})
+
+        # Find the audit log message
+        audit_logs = [r for r in caplog.records if "SECURITY_AUDIT" in r.message]
+        assert len(audit_logs) == 1
+        # Should mention fields_redacted=2 (password and token - path is safe)
+        assert "fields_redacted=2" in audit_logs[0].message
