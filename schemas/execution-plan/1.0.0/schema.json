@@ -232,15 +232,14 @@
 			"type": "object",
 			"description": "Hard execution limits. Executor MUST enforce these.",
 			"required": [
-				"allow_unplanned",
 				"max_total_operations"
 			],
 			"additionalProperties": false,
 			"properties": {
 				"allow_unplanned": {
-				    "type": "boolean",
-				    "default": false,
-				    "description": "Whether execution is allowed to deviate from the plan. Governance runtimes SHOULD enforce false."
+					"type": "boolean",
+					"default": false,
+					"description": "Whether execution is allowed to deviate from the plan. Governance runtimes SHOULD enforce false."
 				},
 				"max_total_operations": {
 					"type": "integer",

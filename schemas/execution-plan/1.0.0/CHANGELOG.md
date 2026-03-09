@@ -7,23 +7,9 @@ and this schema adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [1.0.0] - 2026-03-08
 
-### Design Decisions
-
-- `allow_unplanned` is `const: false` — executor cannot deviate from plan
-- All verification conditions must be deterministic (no natural language)
-- Field provenance documented (LLM-generated vs inherited vs system-generated)
-
-#### Strictness vs. extensibility
-
-- The schema is intentionally strict (`additionalProperties: false`) for execution-affecting structures to prevent unexpected fields from influencing behavior.
-- This schema is currently shipped as a reference artifact and is not yet wired into the runtime planner/executor. Until migration, LLM output validation behavior remains governed by the legacy schema.
-- When the runtime migrates to v1.x, we will use an explicit strategy for handling extra fields commonly produced by LLMs:
-  - either reject unknown properties strictly, or
-  - canonicalize plans by dropping unknown properties before validation and execution.
-
 ### Added
 
-Initial stable release.
+Initial schema landing. 
 
 #### Required Fields
 - `version` — Schema version (const "1.0.0")
@@ -70,9 +56,17 @@ Initial stable release.
 - Pattern types: exact, glob, regex
 - ArgPattern supports range matching (min/max)
 
-### Design Decisions
+### Design Decisions 
 
-- `allow_unplanned` is `const: false` — executor cannot deviate from plan
+- `allow_unplanned` defaults to `false` — governance runtimes should enforce non-deviation from the plan
 - All verification conditions must be deterministic (no natural language)
 - Field provenance documented (LLM-generated vs inherited vs system-generated)
 - Schema uses `additionalProperties: false` throughout for strictness
+
+#### Strictness vs. extensibility
+
+- The schema is intentionally strict (`additionalProperties: false`) for execution-affecting structures to prevent unexpected fields from influencing behavior.
+- This schema is currently shipped as a reference artifact and is not yet wired into the runtime planner/executor. Until migration, LLM output validation behavior remains governed by the legacy schema.
+- When the runtime migrates to v1.x, we will use an explicit strategy for handling extra fields commonly produced by LLMs:
+  - either reject unknown properties strictly, or
+  - canonicalize plans by dropping unknown properties before validation and execution.

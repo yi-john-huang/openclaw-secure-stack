@@ -93,7 +93,7 @@ __all__ = [
     "Session",
     "ToolCall",
     "ValidationResult",
-    #new schema
+    # Local context injection (experimental)
     "LocalContext",
     "LocalContextResolver",
     "PolicyProvider",

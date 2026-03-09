@@ -2,7 +2,8 @@
 
 A machine-enforceable execution plan for deterministic, non-LLM execution.
 
-This schema is not yet used by PlanGenerator
+This schema is not yet used by `PlanGenerator`. 
+`PlanGenerator` currently uses config/execution-plan.json (legacy schema).
 
 ## Purpose
 
