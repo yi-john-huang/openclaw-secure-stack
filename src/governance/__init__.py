@@ -44,6 +44,15 @@ from src.governance.session import SessionManager
 from src.governance.store import PlanNotFoundError, PlanStore, TokenVerificationResult
 from src.governance.validator import PolicyValidator
 
+from .local_context import (
+    LocalContext,
+    LocalContextResolver,
+    PolicyProvider,
+    SessionProvider,
+    SimplePolicy,
+    SimpleSession,
+)
+
 __all__ = [
     # Exceptions
     "ApprovalExpiredError",
@@ -84,4 +93,11 @@ __all__ = [
     "Session",
     "ToolCall",
     "ValidationResult",
+    # Local context injection (experimental)
+    "LocalContext",
+    "LocalContextResolver",
+    "PolicyProvider",
+    "SessionProvider",
+    "SimplePolicy",
+    "SimpleSession",
 ]

@@ -1,0 +1,76 @@
+{
+  "version": "1.0.0",
+  "plan_id": "550e8400-e29b-41d4-a716-446655440000",
+  "created_at": "2025-02-27T12:00:00Z",
+  "execution_mode": "hybrid",
+  "description_for_user": "Read file contents from /tmp/example.txt",
+  "surface_effects": {
+    "touches": ["/tmp/example.txt"],
+    "modifies": false,
+    "creates": false,
+    "deletes": false
+  },
+  "intent": {
+    "summary": "Read contents of a temporary file",
+    "category": "read",
+    "risk_level": "low",
+    "five_w_one_h": {
+      "who": "system",
+      "what": "read file contents",
+      "where": "/tmp/example.txt",
+      "when": "immediate",
+      "why": "user requested file contents",
+      "how": "filesystem read operation"
+    }
+  },
+  "scope": {
+    "target_system": "filesystem",
+    "environment": "development"
+  },
+  "constraints": {
+    "allow_unplanned": false,
+    "max_total_operations": 1
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Read file",
+      "inputs": {
+        "required": [
+          { "name": "file_path", "type": "string", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "read",
+        "operation": "file",
+        "target": "/tmp/example.txt",
+        "parameters": {}
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "file_exists",
+            "evidence": "filesystem stat",
+            "pass_condition": "file.exists == true"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "abort_plan",
+        "refuse_if": []
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "file_contents", "type": "string", "write_to": "log" }
+        ]
+      }
+    }
+  ],
+  "abort_conditions": [
+    {
+      "condition": "file.exists == false",
+      "reason": "Target file does not exist"
+    }
+  ]
+}

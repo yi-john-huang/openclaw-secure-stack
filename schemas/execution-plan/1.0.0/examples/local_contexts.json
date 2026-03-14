@@ -1,0 +1,298 @@
+[
+    {
+        "user_context": {
+            "actor_id": "sre-jane.doe",
+            "role": "sre",
+            "trust_level": "high",
+            "team": "platform",
+            "access_tier": "prod-admin",
+            "domain": "infra",
+            "oncall": true
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "prod",
+            "allowed_systems": ["kubernetes", "datadog"],
+            "forbidden_systems": ["iam", "billing"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 10,
+            "max_duration_ms": 60000,
+            "require_sequential": true,
+            "data_sensitivity": "internal",
+            "require_approval": {"model": "none"}
+        },
+        "invariants": {
+            "must_hold": ["at least 2 replicas running", "no PDB violations"],
+            "refuse_if": ["targeting kube-system namespace", "deleting PVCs"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "dev-intern.bob",
+            "role": "developer",
+            "trust_level": "low",
+            "team": "payments",
+            "access_tier": "staging-read",
+            "domain": "payments",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "staging",
+            "allowed_systems": ["kubernetes"],
+            "forbidden_systems": ["database", "secrets", "iam"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 5,
+            "max_duration_ms": 30000,
+            "forbidden_commands": ["delete", "exec", "patch"],
+            "data_sensitivity": "internal",
+            "require_approval": {"model": "none"}
+        },
+        "invariants": {
+            "must_hold": ["read-only operations"],
+            "refuse_if": ["any write operation", "accessing secrets"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "dba-carlos.m",
+            "role": "dba",
+            "trust_level": "high",
+            "team": "data-platform",
+            "access_tier": "prod-admin",
+            "domain": "database",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "database",
+            "environment": "prod",
+            "allowed_systems": ["database", "kubernetes"],
+            "forbidden_systems": ["iam"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 20,
+            "max_duration_ms": 600000,
+            "require_sequential": true,
+            "data_sensitivity": "confidential",
+            "require_approval": {
+                "model": "manager",
+                "ticket_reference_required": true
+            }
+        },
+        "invariants": {
+            "must_hold": ["backup exists < 1 hour old", "migration is reversible"],
+            "refuse_if": ["DROP TABLE without WHERE", "truncating audit tables"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "ml-alice.w",
+            "role": "ml-engineer",
+            "trust_level": "medium",
+            "team": "ml-platform",
+            "access_tier": "prod-inference",
+            "domain": "ml",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "prod",
+            "allowed_systems": ["kubernetes", "s3", "mlflow"],
+            "forbidden_systems": ["database", "iam", "billing"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 15,
+            "max_duration_ms": 300000,
+            "max_parallelism": 2,
+            "data_sensitivity": "internal",
+            "require_approval": {"model": "peer"}
+        },
+        "invariants": {
+            "must_hold": ["canary receives < 10% traffic", "rollback deployment exists"],
+            "refuse_if": ["deploying to namespace outside ml-inference-*"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "sec-omar.k",
+            "role": "security",
+            "trust_level": "high",
+            "team": "security",
+            "access_tier": "prod-read",
+            "domain": "security",
+            "oncall": true
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "prod",
+            "allowed_systems": ["kubernetes", "cloudtrail", "splunk"],
+            "forbidden_systems": ["billing"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 50,
+            "max_duration_ms": 600000,
+            "forbidden_commands": ["delete", "patch", "apply"],
+            "data_sensitivity": "confidential",
+            "require_approval": {
+                "model": "none",
+                "incident_reference_required": true
+            }
+        },
+        "invariants": {
+            "must_hold": ["read-only access", "all queries logged to SIEM"],
+            "refuse_if": ["modifying any resource", "accessing PII without incident ref"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "devops-sam.t",
+            "role": "devops",
+            "trust_level": "medium",
+            "team": "platform",
+            "access_tier": "dev-admin",
+            "domain": "infra",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "dev",
+            "allowed_systems": ["kubernetes", "terraform"],
+            "forbidden_systems": ["prod-*", "iam"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 30,
+            "max_duration_ms": 300000,
+            "max_parallelism": 5,
+            "data_sensitivity": "public",
+            "require_approval": {"model": "none"}
+        },
+        "invariants": {
+            "must_hold": ["resource limits set on all pods"],
+            "refuse_if": ["touching prod namespace", "creating LoadBalancer services"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "compliance-lisa.r",
+            "role": "compliance",
+            "trust_level": "medium",
+            "team": "legal",
+            "access_tier": "audit-read",
+            "domain": "compliance",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "docs",
+            "environment": "prod",
+            "allowed_systems": ["docs", "confluence", "jira"],
+            "forbidden_systems": ["kubernetes", "database", "iam"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 100,
+            "max_duration_ms": 900000,
+            "data_sensitivity": "regulated",
+            "require_approval": {"model": "none"}
+        },
+        "invariants": {
+            "must_hold": ["output contains no PII", "all queries logged"],
+            "refuse_if": ["exporting raw customer data", "accessing engineering systems"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "dev-priya.s",
+            "role": "developer",
+            "trust_level": "medium",
+            "team": "web",
+            "access_tier": "staging-deploy",
+            "domain": "frontend",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "staging",
+            "allowed_systems": ["kubernetes", "s3", "cloudfront"],
+            "forbidden_systems": ["database", "iam", "prod-*"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 10,
+            "max_duration_ms": 180000,
+            "data_sensitivity": "internal",
+            "require_approval": {"model": "self"}
+        },
+        "invariants": {
+            "must_hold": ["deployment targets staging-web namespace only"],
+            "refuse_if": ["touching backend services", "modifying ingress rules"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "data-eng-mike.j",
+            "role": "data-engineer",
+            "trust_level": "medium",
+            "team": "data-platform",
+            "access_tier": "prod-data",
+            "domain": "data",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "airflow",
+            "environment": "prod",
+            "allowed_systems": ["airflow", "s3", "redshift", "kubernetes"],
+            "forbidden_systems": ["iam", "billing"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 25,
+            "max_duration_ms": 600000,
+            "data_sensitivity": "confidential",
+            "require_approval": {
+                "model": "peer",
+                "ticket_reference_required": true
+            }
+        },
+        "invariants": {
+            "must_hold": ["no duplicate data writes", "idempotent operations only"],
+            "refuse_if": ["truncating production tables", "backfilling without date bounds"]
+        }
+    },
+    {
+        "user_context": {
+            "actor_id": "lead-dan.h",
+            "role": "tech-lead",
+            "trust_level": "high",
+            "team": "platform",
+            "access_tier": "prod-admin",
+            "domain": "infra",
+            "oncall": false
+        },
+        "scope": {
+            "target_system": "kubernetes",
+            "environment": "prod",
+            "allowed_systems": ["kubernetes", "aws", "datadog"],
+            "forbidden_systems": ["iam"]
+        },
+        "constraints": {
+            "allow_unplanned": false,
+            "max_total_operations": 50,
+            "max_duration_ms": 600000,
+            "max_parallelism": 3,
+            "data_sensitivity": "internal",
+            "require_approval": {"model": "self"}
+        },
+        "invariants": {
+            "must_hold": ["no running workloads deleted", "PDBs respected"],
+            "refuse_if": ["deleting namespaces with active pods", "removing monitoring"]
+        }
+    }
+]

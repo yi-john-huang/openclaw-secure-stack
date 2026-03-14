@@ -1,0 +1,813 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://example.org/schemas/execution-plan.etalon.v1.json",
+	"title": "ExecutionPlan",
+	"description": "A machine-enforceable execution plan for deterministic, non-LLM execution. Single source of truth for what will be executed.",
+	"type": "object",
+	"required": [
+		"version",
+		"plan_id",
+		"created_at",
+		"execution_mode",
+		"intent",
+		"steps",
+		"constraints",
+		"abort_conditions",
+		"description_for_user",
+		"surface_effects"
+	],
+	"additionalProperties": false,
+	"properties": {
+		"version": {
+			"type": "string",
+			"const": "1.0.0",
+			"description": "Schema version for forward compatibility."
+		},
+		"plan_id": {
+			"type": "string",
+			"format": "uuid",
+			"description": "Unique identifier for binding, replay protection, and audit correlation."
+		},
+		"id": {
+			"type": "string",
+			"pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$",
+			"description": "Human-readable plan type identifier (e.g., 'k8s_ops.rollback')."
+		},
+		"session_id": {
+			"type": "string",
+			"description": "Bound session identifier (executor/governance runtime)."
+		},
+		"created_at": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Plan creation timestamp."
+		},
+		"expires_at": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Plan TTL. Executor MUST reject execution after expiry."
+		},
+		"execution_mode": {
+			"type": "string",
+			"enum": [
+				"governance_driven",
+				"agent_guided",
+				"hybrid"
+			],
+			"description": "How the plan should be executed."
+		},
+		"description_for_user": {
+			"type": "string",
+			"minLength": 10,
+			"description": "Short user-facing description used for confirmation. Must match the plan's actual effects."
+		},
+		"surface_effects": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": [
+				"touches",
+				"modifies",
+				"creates",
+				"deletes"
+			],
+			"properties": {
+				"touches": {
+					"type": "array",
+					"minItems": 1,
+					"items": {
+						"type": "string"
+					},
+					"description": "Resources/surfaces accessed (paths, services, namespaces, docs, tickets)."
+				},
+				"modifies": {
+					"type": "boolean",
+					"description": "Whether existing resources are modified."
+				},
+				"creates": {
+					"type": "boolean",
+					"description": "Whether new resources are created."
+				},
+				"deletes": {
+					"type": "boolean",
+					"description": "Whether resources are deleted."
+				}
+			}
+		},
+		"intent": {
+			"type": "object",
+			"description": "What this plan accomplishes and its risk profile.",
+			"required": [
+				"summary",
+				"category",
+				"five_w_one_h"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"summary": {
+					"type": "string",
+					"minLength": 10,
+					"description": "Human-readable description of what will be executed."
+				},
+				"category": {
+					"type": "string",
+					"enum": [
+						"read",
+						"write",
+						"execute",
+						"deploy",
+						"delete",
+						"mixed"
+					],
+					"description": "Primary operation type for routing and approval."
+				},
+				"user_message": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Original user request (for audit). If the plan is generated from a ticket, store the ticket text or reference."
+				},
+				"five_w_one_h": {
+					"type": "object",
+					"description": "Structured intent breakdown.",
+					"additionalProperties": false,
+					"properties": {
+						"who": {
+							"type": "string",
+							"description": "Who/what executes (user, system, tool)."
+						},
+						"what": {
+							"type": "string",
+							"description": "Concrete operation being performed."
+						},
+						"where": {
+							"type": "string",
+							"description": "Execution surface (path, service, environment)."
+						},
+						"when": {
+							"type": "string",
+							"description": "Timing (immediate, scheduled, conditional)."
+						},
+						"why": {
+							"type": "string",
+							"description": "User-facing reason."
+						},
+						"how": {
+							"type": "string",
+							"description": "High-level method."
+						}
+					}
+				}
+			}
+		},
+		"user_context": {
+			"type": "object",
+			"description": "Who is requesting/initiating execution (for audit and policy).",
+			"additionalProperties": false,
+			"properties": {
+				"actor_id": {
+					"type": "string",
+					"description": "Authenticated user/service identifier."
+				},
+				"role": {
+					"type": "string",
+					"description": "Role name used for policy routing."
+				},
+				"trust_level": {
+					"type": "string",
+					"enum": [
+						"low",
+						"medium",
+						"high"
+					]
+				},
+				"team": {
+					"type": "string"
+				},
+				"access_tier": {
+					"type": "string",
+					"description": "Access tier / environment privileges (e.g., prod-read, prod-admin)."
+				},
+				"domain": {
+					"type": "string",
+					"description": "Domain ownership context (payments, infra, contracts, etc.)."
+				},
+				"oncall": {
+					"type": "boolean"
+				}
+			}
+		},
+		"scope": {
+			"type": "object",
+			"description": "Hard scoping of where execution may touch.",
+			"required": [
+				"target_system",
+				"environment"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"target_system": {
+					"type": "string",
+					"description": "Primary system (kubernetes, database, filesystem, docs, iam, etc.)."
+				},
+				"environment": {
+					"type": "string",
+					"description": "Environment scope (prod, staging, dev, production_inference_only, etc.)."
+				},
+				"allowed_systems": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "If present, executor MUST reject any step targeting systems not in this list."
+				},
+				"forbidden_systems": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Any match MUST be rejected."
+				}
+			}
+		},
+		"constraints": {
+			"type": "object",
+			"description": "Hard execution limits. Executor MUST enforce these.",
+			"required": [
+				"max_total_operations"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"allow_unplanned": {
+					"type": "boolean",
+					"default": false,
+					"description": "Whether execution is allowed to deviate from the plan. Governance runtimes SHOULD enforce false."
+				},
+				"max_total_operations": {
+					"type": "integer",
+					"minimum": 1,
+					"default": 50,
+					"description": "Hard cap on total operations across all steps."
+				},
+				"max_duration_ms": {
+					"type": "integer",
+					"minimum": 1000,
+					"default": 300000,
+					"description": "Plan execution timeout in milliseconds."
+				},
+				"require_sequential": {
+					"type": "boolean",
+					"default": false,
+					"description": "If true, executor MUST ignore step parallel flags and run one step at a time."
+				},
+				"max_parallelism": {
+					"type": "integer",
+					"minimum": 1,
+					"default": 1,
+					"description": "Max concurrent steps when require_sequential=false."
+				},
+				"forbidden_paths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Global path deny patterns (simple strings)."
+				},
+				"forbidden_commands": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Global command deny patterns (simple strings)."
+				},
+				"forbidden_urls": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Global URL deny patterns (simple strings)."
+				},
+				"allow": {
+					"$ref": "#/$defs/AllowDenyPatterns",
+					"description": "Global allow patterns (optional). If present, at least one allow must match for any tool call."
+				},
+				"deny": {
+					"$ref": "#/$defs/AllowDenyPatterns",
+					"description": "Global deny patterns (optional). Any match blocks."
+				},
+				"data_sensitivity": {
+					"type": "string",
+					"enum": [
+						"public",
+						"internal",
+						"confidential",
+						"regulated"
+					],
+					"description": "Data classification for this execution."
+				},
+				"require_approval": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"model": {
+							"type": "string",
+							"enum": [
+								"none",
+								"self",
+								"peer",
+								"manager"
+							],
+							"default": "none"
+						},
+						"incident_reference_required": {
+							"type": "boolean",
+							"default": false
+						},
+						"ticket_reference_required": {
+							"type": "boolean",
+							"default": false
+						}
+					}
+				}
+			}
+		},
+		"invariants": {
+			"type": "object",
+			"description": "Global invariants and refusal conditions that must hold throughout the plan.",
+			"additionalProperties": false,
+			"properties": {
+				"must_hold": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Statements that must remain true during execution (executor MUST stop if violated)."
+				},
+				"preconditions": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Conditions that must be true before any steps run (executor MUST refuse otherwise)."
+				},
+				"refusal_conditions": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "If any condition matches, executor MUST refuse to run the plan."
+				}
+			}
+		},
+		"steps": {
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"$ref": "#/$defs/Step"
+			},
+			"description": "Executable steps. Ordering is controlled by depends_on + constraints.require_sequential."
+		},
+		"abort_conditions": {
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"$ref": "#/$defs/AbortCondition"
+			},
+			"description": "Conditions that cause plan abortion during execution."
+		},
+		"metadata": {
+			"$ref": "#/$defs/Metadata"
+		}
+	},
+	"$defs": {
+		"Step": {
+			"type": "object",
+			"required": [
+				"step",
+				"action",
+				"inputs",
+				"do",
+				"verify",
+				"on_fail",
+				"audit"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"step": {
+					"type": "integer",
+					"minimum": 1,
+					"description": "Stable step identifier. Does NOT imply execution order."
+				},
+				"action": {
+					"type": "string",
+					"minLength": 3,
+					"description": "Short action label for UI and audit."
+				},
+				"depends_on": {
+					"type": "array",
+					"items": {
+						"type": "integer",
+						"minimum": 1
+					},
+					"uniqueItems": true,
+					"default": [],
+					"description": "Steps that must COMPLETE successfully before this step may start."
+				},
+				"parallel": {
+					"type": "boolean",
+					"default": false,
+					"description": "If true, this step MAY run concurrently with other eligible steps (subject to constraints)."
+				},
+				"max_invocations": {
+					"type": "integer",
+					"minimum": 1,
+					"default": 1,
+					"description": "Maximum number of times this step may be executed."
+				},
+				"timeout_ms": {
+					"type": "integer",
+					"minimum": 1,
+					"description": "Step-specific timeout in milliseconds."
+				},
+				"requires_confirmation": {
+					"type": "boolean",
+					"default": false,
+					"description": "If true, executor MUST pause and require explicit human confirmation before executing this step."
+				},
+				"inputs": {
+					"type": "object",
+					"required": [
+						"required",
+						"optional"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"required": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/InputSpec"
+							}
+						},
+						"optional": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/InputSpec"
+							}
+						}
+					}
+				},
+				"do": {
+					"type": "object",
+					"description": "The actual operation to perform.",
+					"required": [
+						"tool",
+						"operation"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"tool": {
+							"type": "string",
+							"description": "Tool name (exec, read, write, http, k8s, etc.)."
+						},
+						"operation": {
+							"type": "string",
+							"description": "Operation type within the tool."
+						},
+						"target": {
+							"type": "string",
+							"description": "Target resource (path, URL, resource name)."
+						},
+						"parameters": {
+							"type": "object",
+							"additionalProperties": true,
+							"description": "Operation parameters."
+						},
+						"parameter_schema": {
+							"type": "object",
+							"additionalProperties": false,
+							"required": [
+								"required",
+								"optional"
+							],
+							"description": "Optional schema for parameters if executor needs to validate types/shape strictly.",
+							"properties": {
+								"required": {
+									"type": "array",
+									"items": {
+										"$ref": "#/$defs/InputSpec"
+									}
+								},
+								"optional": {
+									"type": "array",
+									"items": {
+										"$ref": "#/$defs/InputSpec"
+									}
+								}
+							}
+						},
+						"allow": {
+							"$ref": "#/$defs/AllowDenyPatterns",
+							"description": "Step-specific allow patterns."
+						},
+						"deny": {
+							"$ref": "#/$defs/AllowDenyPatterns",
+							"description": "Step-specific deny patterns (overrides allow)."
+						}
+					}
+				},
+				"verify": {
+					"type": "object",
+					"required": [
+						"checks"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"checks": {
+							"type": "array",
+							"minItems": 1,
+							"items": {
+								"$ref": "#/$defs/CheckSpec"
+							},
+							"description": "Deterministic checks. No subjective language."
+						}
+					}
+				},
+				"on_fail": {
+					"type": "object",
+					"required": [
+						"behavior",
+						"refuse_if"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"behavior": {
+							"type": "string",
+							"enum": [
+								"abort_plan",
+								"abort_step",
+								"mark_failed_and_continue",
+								"complete_with_warning"
+							],
+							"description": "Executor-only behavior. No re-planning."
+						},
+						"refuse_if": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							},
+							"description": "If any condition matches, executor MUST refuse to execute this step."
+						},
+						"required_log_entries": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"audit": {
+					"type": "object",
+					"required": [
+						"record_outputs"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"record_outputs": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/OutputSpec"
+							},
+							"description": "What outputs must be recorded and where."
+						}
+					}
+				}
+			}
+		},
+		"InputSpec": {
+			"type": "object",
+			"required": [
+				"name",
+				"type"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string",
+					"enum": [
+						"string",
+						"integer",
+						"number",
+						"boolean",
+						"array",
+						"object"
+					]
+				},
+				"source": {
+					"type": "string",
+					"description": "Where the executor must obtain it (ticket, repo, dashboard, previous_step, user, etc.)."
+				},
+				"constraints": {
+					"type": "object",
+					"additionalProperties": true
+				}
+			}
+		},
+		"OutputSpec": {
+			"type": "object",
+			"required": [
+				"name",
+				"type"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string",
+					"enum": [
+						"string",
+						"integer",
+						"number",
+						"boolean",
+						"array",
+						"object"
+					]
+				},
+				"write_to": {
+					"type": "string",
+					"description": "Where it must be recorded (ticket, log, registry, docs, etc.)."
+				},
+				"constraints": {
+					"type": "object",
+					"additionalProperties": true
+				}
+			}
+		},
+		"CheckSpec": {
+			"type": "object",
+			"required": [
+				"name",
+				"evidence",
+				"pass_condition"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"evidence": {
+					"type": "string",
+					"description": "What is observed (dashboard metric, doc status, registry record, etc.)."
+				},
+				"pass_condition": {
+					"type": "string",
+					"description": "Deterministic condition (no natural language 'looks good')."
+				}
+			}
+		},
+		"AbortCondition": {
+			"type": "object",
+			"required": [
+				"condition",
+				"reason"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"condition": {
+					"type": "string",
+					"description": "Machine-checkable condition expression or exact failure trigger."
+				},
+				"reason": {
+					"type": "string",
+					"description": "Human-readable reason for audit."
+				},
+				"check_frequency": {
+					"type": "string",
+					"enum": [
+						"before_each_step",
+						"after_each_step",
+						"continuous"
+					],
+					"default": "before_each_step"
+				}
+			}
+		},
+		"AllowDenyPatterns": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"commands": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/Pattern"
+					}
+				},
+				"paths": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/Pattern"
+					}
+				},
+				"urls": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/Pattern"
+					}
+				},
+				"args": {
+					"type": "object",
+					"additionalProperties": {
+						"oneOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							{
+								"$ref": "#/$defs/ArgPattern"
+							}
+						]
+					}
+				}
+			}
+		},
+		"Pattern": {
+			"type": "object",
+			"required": [
+				"pattern"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"pattern": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string",
+					"enum": [
+						"exact",
+						"glob",
+						"regex"
+					],
+					"default": "glob"
+				}
+			}
+		},
+		"ArgPattern": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"pattern": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string",
+					"enum": [
+						"exact",
+						"glob",
+						"regex",
+						"range"
+					],
+					"default": "exact"
+				},
+				"min": {
+					"type": "number"
+				},
+				"max": {
+					"type": "number"
+				}
+			}
+		},
+		"Metadata": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"generated_by": {
+					"type": "string",
+					"description": "Model/system that generated the plan."
+				},
+				"quality_score": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 100,
+					"description": "Optional plan quality score."
+				},
+				"source_context_ref": {
+					"type": "string",
+					"description": "Reference to policy/constitution/context input used."
+				},
+				"tags": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			}
+		}
+	}
+}

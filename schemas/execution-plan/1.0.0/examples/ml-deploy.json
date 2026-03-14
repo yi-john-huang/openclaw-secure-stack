@@ -1,0 +1,414 @@
+{
+  "version": "1.0.0",
+  "plan_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "id": "ml_ops.deploy_model",
+  "session_id": "session-ml-456",
+  "created_at": "2025-02-27T09:00:00Z",
+  "expires_at": "2025-02-27T13:00:00Z",
+  "execution_mode": "governance_driven",
+  "description_for_user": "Deploy ML model 'fraud-detector-v2.3' to production inference with 10% canary traffic",
+  "surface_effects": {
+    "touches": [
+      "model-registry/fraud-detector",
+      "kubernetes/deployments/fraud-detector-inference",
+      "monitoring/dashboards/fraud-detector",
+      "change-management/CHG-98765"
+    ],
+    "modifies": true,
+    "creates": true,
+    "deletes": false
+  },
+  "intent": {
+    "summary": "Deploy new fraud detection model version with canary rollout and monitoring validation",
+    "category": "deploy",
+    "risk_level": "high",
+    "user_message": "Deploy fraud-detector v2.3 to prod, use canary",
+    "five_w_one_h": {
+      "who": "MLOps engineer",
+      "what": "deploy new model version with canary traffic split",
+      "where": "production inference cluster",
+      "when": "during approved change window",
+      "why": "improved fraud detection accuracy in staging validation",
+      "how": "canary deployment with 10% traffic, monitor, then full rollout"
+    }
+  },
+  "user_context": {
+    "actor_id": "mlops-alex",
+    "role": "mlops_engineer",
+    "trust_level": "high",
+    "team": "ml-platform",
+    "access_tier": "prod-write",
+    "domain": "inference"
+  },
+  "scope": {
+    "target_system": "kubernetes",
+    "environment": "production",
+    "allowed_systems": ["kubernetes", "model-registry", "monitoring", "change-management"],
+    "forbidden_systems": ["training-data", "feature-store-write"]
+  },
+  "constraints": {
+    "allow_unplanned": false,
+    "max_total_operations": 20,
+    "max_duration_ms": 3600000,
+    "require_sequential": true,
+    "forbidden_paths": ["/data/training/*", "/secrets/*"],
+    "forbidden_commands": ["kubectl delete", "rm -rf"],
+    "data_sensitivity": "confidential",
+    "require_approval": {
+      "model": "manager",
+      "incident_reference_required": false,
+      "ticket_reference_required": true
+    }
+  },
+  "invariants": {
+    "must_hold": [
+      "existing_model.available == true",
+      "canary_error_rate < baseline_error_rate * 1.5"
+    ],
+    "preconditions": [
+      "model artifact exists in registry",
+      "staging validation passed",
+      "change ticket approved"
+    ],
+    "refusal_conditions": [
+      "model checksum mismatch",
+      "change ticket not approved",
+      "outside change window"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Validate model artifact",
+      "inputs": {
+        "required": [
+          { "name": "model_id", "type": "string", "source": "parameter" },
+          { "name": "expected_checksum", "type": "string", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "model-registry",
+        "operation": "get_artifact",
+        "target": "fraud-detector-v2.3",
+        "parameters": { "include_checksum": true }
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "artifact_exists",
+            "evidence": "registry response",
+            "pass_condition": "artifact.status == 'available'"
+          },
+          {
+            "name": "checksum_matches",
+            "evidence": "artifact metadata",
+            "pass_condition": "artifact.checksum == expected_checksum"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "abort_plan",
+        "refuse_if": ["artifact.status == 'not_found'"]
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "artifact_checksum", "type": "string", "write_to": "log" },
+          { "name": "artifact_size_mb", "type": "number", "write_to": "log" }
+        ]
+      }
+    },
+    {
+      "step": 2,
+      "action": "Verify change ticket approval",
+      "depends_on": [1],
+      "inputs": {
+        "required": [
+          { "name": "change_ticket_id", "type": "string", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "change-management",
+        "operation": "get_ticket",
+        "target": "CHG-98765",
+        "parameters": {}
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "ticket_approved",
+            "evidence": "change management response",
+            "pass_condition": "ticket.approval_status == 'approved'"
+          },
+          {
+            "name": "within_change_window",
+            "evidence": "ticket schedule",
+            "pass_condition": "now >= ticket.window_start && now <= ticket.window_end"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "abort_plan",
+        "refuse_if": ["ticket.approval_status != 'approved'"]
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "approver_id", "type": "string", "write_to": "log" },
+          { "name": "approval_timestamp", "type": "string", "write_to": "log" }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "action": "Deploy canary (10% traffic)",
+      "depends_on": [2],
+      "requires_confirmation": true,
+      "timeout_ms": 300000,
+      "inputs": {
+        "required": [
+          { "name": "model_id", "type": "string", "source": "parameter" },
+          { "name": "canary_percentage", "type": "integer", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "k8s",
+        "operation": "apply",
+        "target": "deployment/fraud-detector-canary",
+        "parameters": {
+          "namespace": "inference",
+          "image": "registry.internal/fraud-detector:v2.3",
+          "traffic_weight": 10
+        },
+        "allow": {
+          "paths": [
+            { "pattern": "/manifests/fraud-detector-*.yaml", "type": "glob" }
+          ]
+        }
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "canary_deployed",
+            "evidence": "deployment status",
+            "pass_condition": "deployment.status == 'available'"
+          },
+          {
+            "name": "traffic_split_configured",
+            "evidence": "istio virtual service",
+            "pass_condition": "virtualservice.canary_weight == 10"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "abort_plan",
+        "refuse_if": [],
+        "required_log_entries": ["deployment_error", "pod_events"]
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "canary_deployment_id", "type": "string", "write_to": "log" },
+          { "name": "canary_pod_count", "type": "integer", "write_to": "log" }
+        ]
+      }
+    },
+    {
+      "step": 4,
+      "action": "Monitor canary metrics (30 min)",
+      "depends_on": [3],
+      "timeout_ms": 1920000,
+      "max_invocations": 6,
+      "inputs": {
+        "required": [
+          { "name": "baseline_error_rate", "type": "number", "source": "parameter" },
+          { "name": "monitoring_duration_minutes", "type": "integer", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "monitoring",
+        "operation": "query_metrics",
+        "target": "fraud-detector-canary",
+        "parameters": {
+          "metrics": ["error_rate", "latency_p99", "throughput"],
+          "window": "5m",
+          "compare_to": "fraud-detector-stable"
+        }
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "error_rate_acceptable",
+            "evidence": "prometheus metrics",
+            "pass_condition": "canary.error_rate <= baseline_error_rate * 1.5"
+          },
+          {
+            "name": "latency_acceptable",
+            "evidence": "prometheus metrics",
+            "pass_condition": "canary.latency_p99 <= baseline_latency_p99 * 1.2"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "abort_plan",
+        "refuse_if": ["canary.error_rate > baseline_error_rate * 2"],
+        "required_log_entries": ["metric_values", "comparison_baseline"]
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "canary_error_rate", "type": "number", "write_to": "monitoring" },
+          { "name": "canary_latency_p99", "type": "number", "write_to": "monitoring" },
+          { "name": "monitoring_pass", "type": "boolean", "write_to": "log" }
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "action": "Promote to full rollout",
+      "depends_on": [4],
+      "requires_confirmation": true,
+      "inputs": {
+        "required": [
+          { "name": "model_id", "type": "string", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "k8s",
+        "operation": "apply",
+        "target": "deployment/fraud-detector-inference",
+        "parameters": {
+          "namespace": "inference",
+          "image": "registry.internal/fraud-detector:v2.3",
+          "traffic_weight": 100
+        }
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "rollout_complete",
+            "evidence": "deployment status",
+            "pass_condition": "deployment.readyReplicas == deployment.replicas"
+          },
+          {
+            "name": "old_version_scaled_down",
+            "evidence": "deployment status",
+            "pass_condition": "old_deployment.replicas == 0"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "abort_plan",
+        "refuse_if": [],
+        "required_log_entries": ["rollout_status", "pod_events"]
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "final_replica_count", "type": "integer", "write_to": "log" },
+          { "name": "rollout_duration_seconds", "type": "integer", "write_to": "log" }
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "action": "Update model registry",
+      "depends_on": [5],
+      "inputs": {
+        "required": [
+          { "name": "model_id", "type": "string", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "model-registry",
+        "operation": "update_deployment_status",
+        "target": "fraud-detector-v2.3",
+        "parameters": {
+          "status": "deployed",
+          "environment": "production",
+          "deployed_at": "now"
+        }
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "registry_updated",
+            "evidence": "registry response",
+            "pass_condition": "response.status == 200"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "complete_with_warning",
+        "refuse_if": []
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "registry_update_status", "type": "string", "write_to": "log" }
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "action": "Close change ticket",
+      "depends_on": [6],
+      "inputs": {
+        "required": [
+          { "name": "change_ticket_id", "type": "string", "source": "parameter" }
+        ],
+        "optional": []
+      },
+      "do": {
+        "tool": "change-management",
+        "operation": "update_ticket",
+        "target": "CHG-98765",
+        "parameters": {
+          "status": "completed",
+          "completion_notes": "Model fraud-detector-v2.3 deployed successfully to production"
+        }
+      },
+      "verify": {
+        "checks": [
+          {
+            "name": "ticket_closed",
+            "evidence": "change management response",
+            "pass_condition": "ticket.status == 'completed'"
+          }
+        ]
+      },
+      "on_fail": {
+        "behavior": "complete_with_warning",
+        "refuse_if": []
+      },
+      "audit": {
+        "record_outputs": [
+          { "name": "ticket_closure_status", "type": "string", "write_to": "log" }
+        ]
+      }
+    }
+  ],
+  "abort_conditions": [
+    {
+      "condition": "canary.error_rate > baseline_error_rate * 2",
+      "reason": "Canary error rate exceeded 2x baseline - automatic rollback required",
+      "check_frequency": "continuous"
+    },
+    {
+      "condition": "existing_model.available == false",
+      "reason": "Stable model became unavailable - unsafe to continue deployment",
+      "check_frequency": "before_each_step"
+    },
+    {
+      "condition": "change_ticket.status == 'cancelled'",
+      "reason": "Change ticket was cancelled externally",
+      "check_frequency": "before_each_step"
+    }
+  ],
+  "metadata": {
+    "generated_by": "planner-v1",
+    "quality_score": 90,
+    "source_context_ref": "policies/mlops-deploy-policy.json",
+    "tags": ["ml", "deployment", "canary", "production", "fraud-detection"]
+  }
+}

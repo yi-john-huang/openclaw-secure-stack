@@ -111,6 +111,15 @@ class PlanGenerator:
             patterns_path: Path to the intent-patterns.json config file.
             llm: Optional LLM client for plan enhancement.
             schema_path: Path to execution-plan.json schema file.
+
+        NOTE: The planner currently expects the legacy (camelCase) enhanced plan schema.
+        We keep config/execution-plan.json for backward compatibility while the
+        planner/parsing logic is migrated to the v1.0.0 schema (snake_case) under
+        schemas/execution-plan/1.0.0/.
+
+        A future PR will intentionally introduce a clean breaking change:
+        - switch default schema_path to the v1 schema
+        - update parsing to accept snake_case (or dual-format during transition)
         """
         self._patterns_path = patterns_path
         self._schema_path = schema_path
